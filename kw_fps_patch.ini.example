@@ -3,8 +3,8 @@
 ; Master switch. The dinput8 proxy still forwards normally when disabled.
 enabled=1
 
-; Supported values: 45 or 90. Default: 45.
-target_fps=45
+; Supported values: 90 or 45. Default: 90.
+target_fps=90
 
 ; 1 installs the QPC-based outer-loop pacer. 0 retains the game's rounded
 ; integer-millisecond outer limiter after removing the separate 29 ms display wait.

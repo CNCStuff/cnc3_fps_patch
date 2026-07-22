@@ -46,19 +46,24 @@ or support arbitrary display rates such as 60, 120, or 144 FPS.
 
 ## Configuration
 
-Copy `kw_fps_patch.ini.example` to `kw_fps_patch.ini`:
+The release ZIP already includes `kw_fps_patch.ini` with these settings:
 
 ```ini
 [kw_fps_patch]
 enabled=1
-target_fps=45
+target_fps=90
 precise_pacing=1
 spin_threshold_us=400
 logging=1
 ```
 
-`target_fps` accepts only `45` or `90`. Start with 45 when validating a new
-installation.
+To use 45 FPS instead, change one line and restart the game:
+
+```ini
+target_fps=45
+```
+
+Only `90` and `45` are accepted.
 
 ## Build on macOS
 
@@ -128,8 +133,8 @@ dinput8 proxy forwarding initialized
 Game hook reached: GameEngine_ApplyRuntimeConfiguration tail
 Static visual and limiter patches installed
 Frame-counted particles, tracers, clouds and Anim2D pinned to retail 30 Hz
-Applied client FPS=45
-Applied W3D milliseconds/client-frame=22
+Applied client FPS=90
+Applied W3D milliseconds/client-frame=11
 ```
 
 ## Limitations

@@ -6,7 +6,7 @@ The signature resolver recognizes the Steam 2012 and EA/Origin-era 2009
 Kane's Wrath 1.02 executables and Kane's Wrath 1.03 (2025). Test each build
 separately; successful signature resolution does not replace gameplay testing.
 
-Begin with `target_fps=45` and verify:
+Begin with the shipped `target_fps=90` configuration and verify:
 
 - The game reaches the main menu and input works.
 - `kw_fps_patch.log` is created beside the DLL.
@@ -50,11 +50,11 @@ If the spin tail consumes too much CPU, lower `spin_threshold_us`. If the final
 deadline jitters, raise it modestly; values above 1000 microseconds need clear
 frame-time evidence.
 
-## 90 FPS load
+## 45 FPS alternative
 
-After 45 FPS is stable, set `target_fps=90`, restart the process, and repeat the
-gameplay checks. Include a large battle to expose CPU-bound slowdown. Visual
-state should advance at stock real-time speed while rendering more frequently.
+After validating the default 90 FPS mode, set `target_fps=45`, restart the
+process, and repeat the gameplay checks. The log should report a 22 ms W3D
+step, while visual state continues at stock real-time speed.
 
 ## Replay and multiplayer determinism
 

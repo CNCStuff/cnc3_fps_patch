@@ -2,7 +2,7 @@
 
 void kw_config_set_defaults(KwConfig *config) {
     config->enabled = TRUE;
-    config->target_fps = 45;
+    config->target_fps = 90;
     config->precise_pacing = TRUE;
     config->spin_threshold_us = 400;
     config->logging = TRUE;
