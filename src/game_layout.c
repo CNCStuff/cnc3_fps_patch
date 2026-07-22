@@ -294,7 +294,6 @@ static BOOL kw_resolve_visual_sites(
     if (!kw_read_absolute_rva(module, game->pe_size_of_image,
                               visual->radius_cursor_fps_operand,
                               &visual->retail_frames_per_millisecond) ||
-        kw_load_u32(module + visual->retail_frames_per_millisecond) != 0x3CF5C28Fu ||
         !kw_read_absolute_rva(module, game->pe_size_of_image,
                               visual->camera_step_operand, &visual->retail_step)) {
         return FALSE;
