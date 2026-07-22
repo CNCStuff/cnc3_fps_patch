@@ -108,6 +108,26 @@ static BOOL kw_validate_runtime_u32(const char *site_name, kw_u32 rva, kw_u32 ex
     return FALSE;
 }
 
+static BOOL kw_validate_relative_target(const char *site_name, kw_u32 rva,
+                                        kw_u8 opcode, kw_u32 expected_target_rva) {
+    kw_i32 displacement;
+    kw_u32 actual_target_rva;
+    if (g_kw_game_module[rva] != opcode) {
+        kw_log_text("ERROR: runtime branch opcode mismatch at ");
+        kw_log_line(site_name);
+        kw_log_hex32("  RVA=", rva);
+        return FALSE;
+    }
+    memcpy(&displacement, g_kw_game_module + rva + 1u, sizeof(displacement));
+    actual_target_rva = rva + 5u + (kw_u32)displacement;
+    if (actual_target_rva == expected_target_rva) return TRUE;
+    kw_log_text("ERROR: runtime branch target mismatch at ");
+    kw_log_line(site_name);
+    kw_log_hex32("  actual target RVA=", actual_target_rva);
+    kw_log_hex32("  expected target RVA=", expected_target_rva);
+    return FALSE;
+}
+
 static void kw_store_u32(kw_u8 *bytes, kw_u32 value) {
     bytes[0] = (kw_u8)value;
     bytes[1] = (kw_u8)(value >> 8);
@@ -143,7 +163,10 @@ static BOOL kw_initialize_runtime_files(void) {
     ini_found = kw_config_load(&g_kw_config, g_ini_path);
     kw_log_open(g_log_path, g_kw_config.logging);
     kw_log_line("Kane's Wrath FPS patch bootstrap");
-    kw_log_line("Target: Kane's Wrath 1.02 cnc3ep1.dat (32-bit)");
+    kw_log_text("Resolved target: ");
+    kw_log_line(g_kw_game_layout.build_name);
+    kw_log_hex32("PE timestamp=", g_kw_game_layout.pe_timestamp);
+    kw_log_hex32("PE image size=", g_kw_game_layout.pe_size_of_image);
     kw_log_line(ini_found ? "Configuration: kw_fps_patch.ini loaded" :
                             "Configuration: using built-in defaults");
     kw_log_u32("target_fps=", g_kw_config.target_fps);
@@ -174,8 +197,7 @@ static BOOL kw_validate_runtime_patch_sites(void) {
     static const kw_u8 tracer_reset_get_frame[5] = {0x8B, 0x01, 0xFF, 0x50, 0x78};
     static const kw_u8 tracer_update_get_frame[6] = {0x8B, 0x01, 0x57, 0xFF, 0x50, 0x78};
     static const kw_u8 virtual_get_frame[5] = {0x8B, 0x01, 0xFF, 0x50, 0x78};
-    static const kw_u8 fx_particle_simulation_call[5] = {0xE8, 0xE4, 0x19, 0x2E, 0x00};
-    static const kw_u8 gpu_particle_frame_rate[7] = {0x0F, 0xAF, 0x05, 0x80, 0xEA, 0xB7, 0x00};
+    static const kw_u8 gpu_particle_frame_rate_opcode[3] = {0x0F, 0xAF, 0x05};
     static const kw_u8 pacing_prefix[2] = {0x80, 0x3D};
     static const kw_u8 pacing_suffix[3] = {0x00, 0x74, 0x69};
     kw_u32 retail_visual = (kw_u32)(uintptr_t)(g_kw_game_module + KW_RVA_RETAIL_VISUAL_STEP);
@@ -222,14 +244,17 @@ static BOOL kw_validate_runtime_patch_sites(void) {
                                    virtual_get_frame, sizeof(virtual_get_frame))) valid = FALSE;
     if (!kw_validate_runtime_bytes("Anim2D update frame read", KW_RVA_ANIM2D_UPDATE_GET_FRAME,
                                    virtual_get_frame, sizeof(virtual_get_frame))) valid = FALSE;
-    if (!kw_validate_runtime_bytes("FX particle simulation call",
-                                   KW_RVA_FX_PARTICLE_SIMULATION_CALL,
-                                   fx_particle_simulation_call,
-                                   sizeof(fx_particle_simulation_call))) valid = FALSE;
+    if (!kw_validate_relative_target("FX particle simulation call",
+                                     KW_RVA_FX_PARTICLE_SIMULATION_CALL, 0xE8,
+                                     KW_RVA_FX_PARTICLE_SIMULATION_TARGET)) valid = FALSE;
     if (!kw_validate_runtime_bytes("GPU particle expiry instruction",
                                    KW_RVA_GPU_PARTICLE_FRAME_RATE_INSTRUCTION,
-                                   gpu_particle_frame_rate,
-                                   sizeof(gpu_particle_frame_rate))) valid = FALSE;
+                                   gpu_particle_frame_rate_opcode,
+                                   sizeof(gpu_particle_frame_rate_opcode))) valid = FALSE;
+    if (!kw_validate_runtime_u32("GPU particle client-FPS operand",
+                                 KW_RVA_GPU_PARTICLE_FRAME_RATE_OPERAND,
+                                 (kw_u32)(uintptr_t)(g_kw_game_module +
+                                                    KW_RVA_CLIENT_UPDATE_FPS))) valid = FALSE;
     if (g_kw_config.precise_pacing) {
         if (!kw_validate_runtime_bytes("outer pacing gate opcode", KW_RVA_OUTER_PACING_GATE,
                                        pacing_prefix, sizeof(pacing_prefix))) valid = FALSE;
@@ -250,7 +275,7 @@ static BOOL kw_install_static_patches(void) {
     static const kw_u8 tracer_reset_original[5] = {0x8B, 0x01, 0xFF, 0x50, 0x78};
     static const kw_u8 tracer_update_original[6] = {0x8B, 0x01, 0x57, 0xFF, 0x50, 0x78};
     static const kw_u8 virtual_get_frame_original[5] = {0x8B, 0x01, 0xFF, 0x50, 0x78};
-    static const kw_u8 fx_particle_original[5] = {0xE8, 0xE4, 0x19, 0x2E, 0x00};
+    kw_u8 fx_particle_original[5];
     kw_u8 tracer_reset_patch[5] = {0xE8, 0, 0, 0, 0};
     kw_u8 tracer_update_patch[6] = {0x57, 0xE8, 0, 0, 0, 0};
     kw_u8 cloud_effect_patch[5] = {0xE8, 0, 0, 0, 0};
@@ -273,6 +298,10 @@ static BOOL kw_install_static_patches(void) {
     BOOL display_written = FALSE, pacing_written = FALSE;
 
     if (g_static_patches_installed) return TRUE;
+
+    memcpy(fx_particle_original,
+           g_kw_game_module + KW_RVA_FX_PARTICLE_SIMULATION_CALL,
+           sizeof(fx_particle_original));
 
     /* Validate the complete transaction before changing the first game byte. */
     if (!kw_validate_runtime_patch_sites()) {
@@ -356,7 +385,7 @@ static BOOL kw_install_static_patches(void) {
                             fx_particle_patch, sizeof(fx_particle_patch))) goto rollback;
     fx_particle_written = TRUE;
     /*
-     * Original instruction at VA 0x007855A6:
+     * Resolved instruction:
      *   imul eax, dword ptr [g_clientUpdateFPS]
      * Redirect only its absolute operand to the DLL-owned constant 30.  GPU
      * creation and shaders already use 30 frame units/second (0.03 per ms).
@@ -583,16 +612,18 @@ static void kw_apply_from_game_hook(const char *source) {
 }
 
 BOOL kw_install_bootstrap_hooks(void) {
-    static const kw_u8 runtime_original[5] = {0xE8, 0x87, 0xBA, 0x12, 0x00};
-    /* DllMain performs only fixed validation and two five-byte redirections. */
+    kw_u8 runtime_original[5];
+    /* DllMain resolves guarded signatures and installs two five-byte redirections. */
     if (!kw_validate_game_pe_headers(g_kw_game_module)) {
         InterlockedExchange(&g_kw_bootstrap_status, KW_BOOTSTRAP_BAD_PE);
         return FALSE;
     }
-    if (!kw_validate_bootstrap_patch_sites(g_kw_game_module)) {
+    if (!kw_resolve_game_layout(g_kw_game_module)) {
         InterlockedExchange(&g_kw_bootstrap_status, KW_BOOTSTRAP_BAD_PATCH_SITES);
         return FALSE;
     }
+    memcpy(runtime_original, g_kw_game_module + KW_RVA_RUNTIME_CONFIG_TAIL_CALL,
+           sizeof(runtime_original));
     if (!kw_write_relative_branch(g_kw_game_module + KW_RVA_RUNTIME_CONFIG_TAIL_CALL,
                                   0xE8, kw_runtime_config_tail_hook)) {
         InterlockedExchange(&g_kw_bootstrap_status, KW_BOOTSTRAP_WRITE_FAILED);

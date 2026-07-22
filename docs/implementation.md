@@ -13,12 +13,15 @@ allocate detour trampolines, or start a worker thread.
 
 During process attach it performs only these guarded operations:
 
-1. Validate the executable's PE machine, timestamp, entry RVA, image size, and
-   checksum.
-2. Validate every bootstrap and later static patch site.
-3. Redirect one existing tail call in
+1. Validate that the loaded image is a sane 32-bit x86 PE.
+2. Scan executable sections for the required masked signatures and require one
+   unique match for every semantic patch site.
+3. Decode relative call targets and absolute global operands from the matched
+   instructions, then validate their relationships and the 15/30 Hz retail
+   invariants.
+4. Redirect one existing tail call in
    `GameEngine_ApplyRuntimeConfiguration` to a DLL wrapper.
-4. Redirect the tail jump in `GameEngine_StartGameSession` to another wrapper.
+5. Redirect the tail jump in `GameEngine_StartGameSession` to another wrapper.
 
 Both wrappers call the original target first. The actual configuration,
 logging, runtime patch allocation, and timing writes therefore execute later,
@@ -26,7 +29,9 @@ outside the loader lock and after CRT initialization.
 
 ## Bootstrap redirections
 
-Addresses are RVAs relative to the loaded executable module.
+The following RVAs are examples from the Steam 2012 executable. The DLL no
+longer uses them as build identity: it resolves the equivalent sites from
+masked instruction signatures at startup.
 
 ```text
 RVA 0x0025368E
@@ -162,8 +167,9 @@ g_audioMillisecondsPerClientFrame
 g_visualSecondsPerClientFrame
 ```
 
-These three values are CRT-initialized live caches at VAs `0x00C0D4F4`,
-`0x00C0D4F8`, and `0x00C0D5BC`. The first and third cover stream integration,
+In the Steam 2012 build these three values are at VAs `0x00C0D4F4`,
+`0x00C0D4F8`, and `0x00C0D5BC`. The resolver derives their locations from CRT
+initializer signatures. The first and third cover stream integration,
 dynamic decals, scripted-model transition lengths, Drawable fades,
 radar/client visuals, and edge-scroll acceleration.
 
@@ -227,7 +233,9 @@ direct fallback when isolating QPC pacing behavior.
 
 ## Patch safety
 
-- Every patch site is validated before the first static visual write.
+- Every required signature must match exactly once.
+- Derived call targets, absolute operands, related globals, and retail timing
+  invariants are validated before the first static visual write.
 - ASLR-adjusted absolute operands are validated against the loaded module base.
 - Code writes use `VirtualProtect` and `FlushInstructionCache`.
 - Static visual writes have best-effort rollback if a later write fails.

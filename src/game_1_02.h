@@ -3,68 +3,59 @@
 
 #include "kw_common.h"
 
-enum {
-    KW_PE_TIMESTAMP = 0x501830D8u,
-    KW_PE_ENTRY_RVA = 0x0000A261u,
-    KW_PE_SIZE_OF_IMAGE = 0x008C4000u,
-    KW_PE_CHECKSUM = 0x00873E85u,
+/*
+ * Resolved Kane's Wrath engine locations.  Code sites are found with unique
+ * masked signatures; absolute operands and relative branches are then decoded
+ * from those instructions.  Keeping the result as RVAs preserves ASLR safety
+ * without tying the patch to one linker layout.
+ */
+typedef struct KwGameLayout {
+    const char *build_name;
+    kw_u32 pe_timestamp;
+    kw_u32 pe_entry_rva;
+    kw_u32 pe_size_of_image;
 
-    KW_RVA_RUNTIME_CONFIG_TAIL_CALL = 0x0025368Eu,
-    KW_RVA_RUNTIME_CONFIG_TAIL_TARGET = 0x0037F11Au,
-    KW_RVA_START_SESSION_TAIL_JUMP = 0x00255F95u,
-    KW_RVA_START_SESSION_TAIL_TARGET = 0x00248E20u,
+    kw_u32 runtime_config_tail_call;
+    kw_u32 runtime_config_tail_target;
+    kw_u32 start_session_tail_jump;
+    kw_u32 start_session_tail_target;
 
-    KW_RVA_LOGIC_FPS = 0x0077EA7Cu,
-    KW_RVA_CLIENT_UPDATE_FPS = 0x0077EA80u,
-    KW_RVA_GAME_ENGINE_POINTER = 0x0080D214u,
-    KW_RVA_GLOBAL_DATA_POINTER = 0x0080D234u,
-    KW_RVA_W3D_MILLISECONDS_PER_CLIENT_FRAME = 0x007FCA94u,
+    kw_u32 logic_fps;
+    kw_u32 client_update_fps;
+    kw_u32 game_engine_pointer;
+    kw_u32 global_data_pointer;
+    kw_u32 w3d_milliseconds_per_client_frame;
+    kw_u32 client_fps_float;
+    kw_u32 audio_milliseconds_per_client_frame;
+    kw_u32 visual_seconds_per_client_frame;
 
-    /* These writable globals are initialized from g_clientUpdateFPS by CRT. */
-    KW_RVA_CLIENT_FPS_FLOAT = 0x0080D4F4u,              /* VA 0x00C0D4F4 */
-    KW_RVA_AUDIO_MILLISECONDS_PER_CLIENT_FRAME = 0x0080D4F8u,
-    KW_RVA_VISUAL_SECONDS_PER_CLIENT_FRAME = 0x0080D5BCu, /* VA 0x00C0D5BC */
+    kw_u32 visual_step_camera_operand;
+    kw_u32 visual_step_laser_operand;
+    kw_u32 visual_step_model_operand;
+    kw_u32 retail_visual_step;
 
-    KW_RVA_VISUAL_STEP_CAMERA_INSTRUCTION = 0x00097ECEu,
-    KW_RVA_VISUAL_STEP_CAMERA_OPERAND = 0x00097ED0u,
-    KW_RVA_VISUAL_STEP_LASER_INSTRUCTION = 0x000A6C5Au,
-    KW_RVA_VISUAL_STEP_LASER_OPERAND = 0x000A6C5Eu,
-    KW_RVA_VISUAL_STEP_MODEL_INSTRUCTION = 0x000BE141u,
-    KW_RVA_VISUAL_STEP_MODEL_OPERAND = 0x000BE145u,
-    KW_RVA_RETAIL_VISUAL_STEP = 0x0061D04Cu,
+    kw_u32 tracer_reset_get_frame;
+    kw_u32 tracer_update_get_frame;
+    kw_u32 cloud_effect_get_frame;
+    kw_u32 anim2d_set_frame_get_frame;
+    kw_u32 anim2d_update_get_frame;
+    kw_u32 fx_particle_simulation_call;
+    kw_u32 fx_particle_simulation_target;
+    kw_u32 gpu_particle_frame_rate_instruction;
+    kw_u32 gpu_particle_frame_rate_operand;
 
-    KW_RVA_TRACER_RESET_GET_FRAME = 0x0009D5B3u,
-    KW_RVA_TRACER_UPDATE_GET_FRAME = 0x0009D5D0u,
-
-    /*
-     * Each site below is the five-byte sequence
-     *     mov eax, [ecx]
-     *     call dword ptr [eax+0x78]  ; GameClient::GetFrameNumber()
-     * with ECX already holding g_gameClient.  Replacing the sequence with a
-     * direct CALL preserves the original this pointer and return register.
-     */
-    KW_RVA_CLOUD_EFFECT_GET_FRAME = 0x00082D00u,       /* VA 0x00482D00 */
-    KW_RVA_ANIM2D_SET_FRAME_GET_FRAME = 0x00374FADu,   /* VA 0x00774FAD */
-    KW_RVA_ANIM2D_UPDATE_GET_FRAME = 0x00379682u,      /* VA 0x00779682 */
-
-    KW_RVA_FX_PARTICLE_SIMULATION_CALL = 0x0009F9ACu,
-    KW_RVA_FX_PARTICLE_SIMULATION_TARGET = 0x00381395u,
-    KW_RVA_GPU_PARTICLE_FRAME_RATE_INSTRUCTION = 0x003855A6u,
-    KW_RVA_GPU_PARTICLE_FRAME_RATE_OPERAND = 0x003855A9u,
-
-    KW_RVA_DISPLAY_LIMITER_BRANCH = 0x000A5B61u,
-    KW_RVA_OUTER_PACING_GATE = 0x00256449u,
-    KW_RVA_OUTER_PACING_NO_LIMIT = 0x002564BBu,
-    KW_RVA_OUTER_PACING_HISTORY = 0x002564DAu,
-
-    KW_RVA_NETWORK_FRAME_PACING_SCALE = 0x0077BC04u,
-    KW_RVA_ENFORCE_FPS_LIMIT_THIS_FRAME = 0x0080D1EDu,
-    KW_RVA_TOTAL_LIMITER_WAIT_MS = 0x0080D200u,
-    KW_RVA_LAST_LIMITER_WAIT_MS = 0x0080D204u,
-    KW_RVA_LAST_ENGINE_FRAME_DURATION_MS = 0x0080D208u,
-    KW_RVA_PREVIOUS_ENGINE_FRAME_TIME_MS = 0x0080D20Cu,
-    KW_RVA_MILLISECONDS_PER_LOGIC_FRAME = 0x0080D49Cu
-};
+    kw_u32 display_limiter_branch;
+    kw_u32 outer_pacing_gate;
+    kw_u32 outer_pacing_no_limit;
+    kw_u32 outer_pacing_history;
+    kw_u32 network_frame_pacing_scale;
+    kw_u32 enforce_fps_limit_this_frame;
+    kw_u32 total_limiter_wait_ms;
+    kw_u32 last_limiter_wait_ms;
+    kw_u32 last_engine_frame_duration_ms;
+    kw_u32 previous_engine_frame_time_ms;
+    kw_u32 milliseconds_per_logic_frame;
+} KwGameLayout;
 
 enum {
     KW_ENGINE_MAX_UPDATE_FPS = 0x18,
@@ -79,7 +70,57 @@ enum {
     KW_GLOBAL_DATA_FPS_LIMIT = 0x54
 };
 
+extern KwGameLayout g_kw_game_layout;
+
+/* Runtime-facing aliases keep patch code readable while the values are now
+ * populated by the signature resolver rather than compile-time constants. */
+#define KW_RVA_RUNTIME_CONFIG_TAIL_CALL (g_kw_game_layout.runtime_config_tail_call)
+#define KW_RVA_RUNTIME_CONFIG_TAIL_TARGET (g_kw_game_layout.runtime_config_tail_target)
+#define KW_RVA_START_SESSION_TAIL_JUMP (g_kw_game_layout.start_session_tail_jump)
+#define KW_RVA_START_SESSION_TAIL_TARGET (g_kw_game_layout.start_session_tail_target)
+#define KW_RVA_LOGIC_FPS (g_kw_game_layout.logic_fps)
+#define KW_RVA_CLIENT_UPDATE_FPS (g_kw_game_layout.client_update_fps)
+#define KW_RVA_GAME_ENGINE_POINTER (g_kw_game_layout.game_engine_pointer)
+#define KW_RVA_GLOBAL_DATA_POINTER (g_kw_game_layout.global_data_pointer)
+#define KW_RVA_W3D_MILLISECONDS_PER_CLIENT_FRAME \
+    (g_kw_game_layout.w3d_milliseconds_per_client_frame)
+#define KW_RVA_CLIENT_FPS_FLOAT (g_kw_game_layout.client_fps_float)
+#define KW_RVA_AUDIO_MILLISECONDS_PER_CLIENT_FRAME \
+    (g_kw_game_layout.audio_milliseconds_per_client_frame)
+#define KW_RVA_VISUAL_SECONDS_PER_CLIENT_FRAME \
+    (g_kw_game_layout.visual_seconds_per_client_frame)
+#define KW_RVA_VISUAL_STEP_CAMERA_OPERAND (g_kw_game_layout.visual_step_camera_operand)
+#define KW_RVA_VISUAL_STEP_LASER_OPERAND (g_kw_game_layout.visual_step_laser_operand)
+#define KW_RVA_VISUAL_STEP_MODEL_OPERAND (g_kw_game_layout.visual_step_model_operand)
+#define KW_RVA_RETAIL_VISUAL_STEP (g_kw_game_layout.retail_visual_step)
+#define KW_RVA_TRACER_RESET_GET_FRAME (g_kw_game_layout.tracer_reset_get_frame)
+#define KW_RVA_TRACER_UPDATE_GET_FRAME (g_kw_game_layout.tracer_update_get_frame)
+#define KW_RVA_CLOUD_EFFECT_GET_FRAME (g_kw_game_layout.cloud_effect_get_frame)
+#define KW_RVA_ANIM2D_SET_FRAME_GET_FRAME (g_kw_game_layout.anim2d_set_frame_get_frame)
+#define KW_RVA_ANIM2D_UPDATE_GET_FRAME (g_kw_game_layout.anim2d_update_get_frame)
+#define KW_RVA_FX_PARTICLE_SIMULATION_CALL (g_kw_game_layout.fx_particle_simulation_call)
+#define KW_RVA_FX_PARTICLE_SIMULATION_TARGET (g_kw_game_layout.fx_particle_simulation_target)
+#define KW_RVA_GPU_PARTICLE_FRAME_RATE_INSTRUCTION \
+    (g_kw_game_layout.gpu_particle_frame_rate_instruction)
+#define KW_RVA_GPU_PARTICLE_FRAME_RATE_OPERAND \
+    (g_kw_game_layout.gpu_particle_frame_rate_operand)
+#define KW_RVA_DISPLAY_LIMITER_BRANCH (g_kw_game_layout.display_limiter_branch)
+#define KW_RVA_OUTER_PACING_GATE (g_kw_game_layout.outer_pacing_gate)
+#define KW_RVA_OUTER_PACING_NO_LIMIT (g_kw_game_layout.outer_pacing_no_limit)
+#define KW_RVA_OUTER_PACING_HISTORY (g_kw_game_layout.outer_pacing_history)
+#define KW_RVA_NETWORK_FRAME_PACING_SCALE (g_kw_game_layout.network_frame_pacing_scale)
+#define KW_RVA_ENFORCE_FPS_LIMIT_THIS_FRAME \
+    (g_kw_game_layout.enforce_fps_limit_this_frame)
+#define KW_RVA_TOTAL_LIMITER_WAIT_MS (g_kw_game_layout.total_limiter_wait_ms)
+#define KW_RVA_LAST_LIMITER_WAIT_MS (g_kw_game_layout.last_limiter_wait_ms)
+#define KW_RVA_LAST_ENGINE_FRAME_DURATION_MS \
+    (g_kw_game_layout.last_engine_frame_duration_ms)
+#define KW_RVA_PREVIOUS_ENGINE_FRAME_TIME_MS \
+    (g_kw_game_layout.previous_engine_frame_time_ms)
+#define KW_RVA_MILLISECONDS_PER_LOGIC_FRAME \
+    (g_kw_game_layout.milliseconds_per_logic_frame)
+
 BOOL kw_validate_game_pe_headers(kw_u8 *module);
-BOOL kw_validate_bootstrap_patch_sites(kw_u8 *module);
+BOOL kw_resolve_game_layout(kw_u8 *module);
 
 #endif

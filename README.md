@@ -1,4 +1,4 @@
-# Kane's Wrath 1.02 fixed-rate FPS patch
+# Kane's Wrath fixed-rate FPS patch
 
 [![Build DLL](https://github.com/CNCStuff/cnc3_fps_patch/actions/workflows/build.yml/badge.svg?branch=main&event=push)](https://github.com/CNCStuff/cnc3_fps_patch/actions/workflows/build.yml?query=branch%3Amain+event%3Apush)
 
@@ -7,18 +7,21 @@ render loop at **45 or 90 FPS** while retaining the stock **15 Hz authoritative
 logic rate**.
 
 The implementation and documentation are LLM-written by **GPT-5.6 Sol**, based
-on reverse engineering of the Kane's Wrath 1.02 game binary.
+on reverse engineering of Kane's Wrath game binaries.
 
 ## Compatibility
 
-- Target: the exact unmodified Kane's Wrath 1.02 `cnc3ep1.dat` analyzed for
-  this project.
 - Platform: 32-bit Windows game process; the DLL can be cross-compiled on
   macOS with Zig.
 - Supported client rates: 45 and 90 FPS.
-- **The 4GB/Large Address Aware patched executable is not supported yet.**
-  The executable and patch-site validation will reject it. Do not disable the
-  guards to force installation.
+- Signature resolution has been verified against the Steam 2012 and EA/Origin-
+  era 2009 Kane's Wrath 1.02 executables, plus Kane's Wrath 1.03 (2025).
+- The Steam and 2009 1.02 binaries are already Large Address Aware. The
+  resolver ignores checksum and LAA-header differences, so an otherwise
+  identical NTCore-patched executable uses the same code signatures.
+- The 2009 and 1.03 builds still need Windows gameplay testing; the Steam 2012
+  build remains the primary tested target.
+- Tiberium Wars is not supported yet.
 - Multiplayer and replay determinism still require runtime validation before
   the patch should be treated as online-safe.
 
@@ -138,8 +141,9 @@ Applied W3D milliseconds/client-frame=22
   but some particle positions can repeat between simulation updates.
 - Truck-draw rotation damping is per-update, but shipped XML leaves its
   frame-sensitive default at `1.0`; no speculative patch is installed.
-- Exact-address and byte guards intentionally abort on unsupported executable
-  builds; the 4GB-patched binary is unsupported.
+- Every required signature must resolve exactly once, and all derived branch
+  targets, operands, globals, and logic-rate invariants must agree before the
+  DLL modifies the process.
 - Proxy DLLs and runtime code patches may trigger generic antivirus warnings.
 
 See [docs/implementation.md](docs/implementation.md) for patch mechanics and

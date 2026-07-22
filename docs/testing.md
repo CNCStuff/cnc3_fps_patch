@@ -2,8 +2,9 @@
 
 ## Compatibility and loader
 
-Use the unmodified Kane's Wrath 1.02 `cnc3ep1.dat`. This DLL does not support a
-4GB/Large Address Aware patched executable.
+The signature resolver recognizes the Steam 2012 and EA/Origin-era 2009
+Kane's Wrath 1.02 executables and Kane's Wrath 1.03 (2025). Test each build
+separately; successful signature resolution does not replace gameplay testing.
 
 Begin with `target_fps=45` and verify:
 
@@ -13,8 +14,8 @@ Begin with `target_fps=45` and verify:
   session hook, and the static-patch installation messages.
 - The process exits normally.
 
-A rejected patch site indicates an unsupported executable or a damaged patch
-installation. Keep the byte guards enabled.
+A rejected signature or patch site indicates an unsupported executable or a
+damaged patch installation. Keep the guards enabled.
 
 ## Gameplay timing
 
