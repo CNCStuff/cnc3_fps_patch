@@ -218,10 +218,10 @@ static void kw_install_particle_and_cursor_timing(KwPatchInstaller *installer) {
                     visual->radius_cursor_fps_instruction,
                     radius_opcode, sizeof(radius_opcode));
     /*
-     * KW 1.03 stores this cached 30/1000 value in zero-initialized data and
-     * fills it during executable CRT startup. Bootstrap resolution runs before
-     * that initializer; this later hook is the first safe place to verify the
-     * expected 0.03f value.
+     * Known KW builds store this cached 30/1000 value in zero-initialized data
+     * and fill it during executable CRT startup. Bootstrap resolution can run
+     * before that initializer; this later hook is the first safe place to
+     * verify the expected 0.03f value.
      */
     if (installer->ok &&
         kw_load_u32(kw_game_address(
