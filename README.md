@@ -144,3 +144,7 @@ Applied W3D milliseconds/client-frame=22
 
 See [docs/implementation.md](docs/implementation.md) for patch mechanics and
 [docs/testing.md](docs/testing.md) for focused runtime validation.
+
+## License
+
+WTFPL Version 2. See [LICENSE](LICENSE).
