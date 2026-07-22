@@ -1,5 +1,5 @@
-#ifndef KW_FPS_PATCH_GAME_1_02_H
-#define KW_FPS_PATCH_GAME_1_02_H
+#ifndef KW_FPS_PATCH_GAME_LAYOUT_H
+#define KW_FPS_PATCH_GAME_LAYOUT_H
 
 #include "kw_common.h"
 

@@ -1,4 +1,4 @@
-#include "game_1_02.h"
+#include "game_layout.h"
 
 #define KW_PATTERN_ANY 0x100u
 
@@ -240,22 +240,6 @@ static BOOL kw_decode_relative_target(kw_u8 *module, kw_u32 image_size,
     return TRUE;
 }
 
-static const char *kw_classify_build(const IMAGE_NT_HEADERS32 *nt) {
-    if (nt->FileHeader.TimeDateStamp == 0x501830D8u &&
-        nt->OptionalHeader.SizeOfImage == 0x008C4000u) {
-        return "Kane's Wrath 1.02 Steam (2012)";
-    }
-    if (nt->FileHeader.TimeDateStamp == 0x4A6F8B01u &&
-        nt->OptionalHeader.SizeOfImage == 0x0084E000u) {
-        return "Kane's Wrath 1.02 EA/Origin-era build (2009)";
-    }
-    if (nt->FileHeader.TimeDateStamp == 0x67B64C7Cu &&
-        nt->OptionalHeader.SizeOfImage == 0x01772000u) {
-        return "Kane's Wrath 1.03 (2025)";
-    }
-    return "Kane's Wrath signature-compatible build";
-}
-
 BOOL kw_resolve_game_layout(kw_u8 *module) {
     IMAGE_NT_HEADERS32 *nt;
     KwGameLayout layout;
@@ -266,7 +250,7 @@ BOOL kw_resolve_game_layout(kw_u8 *module) {
     kw_i32 short_target;
     if (!kw_get_nt_headers(module, &nt)) return FALSE;
     memset(&layout, 0, sizeof(layout));
-    layout.build_name = kw_classify_build(nt);
+    layout.build_name = "Kane's Wrath signature-compatible build";
     layout.pe_timestamp = nt->FileHeader.TimeDateStamp;
     layout.pe_entry_rva = nt->OptionalHeader.AddressOfEntryPoint;
     layout.pe_size_of_image = nt->OptionalHeader.SizeOfImage;

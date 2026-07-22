@@ -14,13 +14,12 @@ on reverse engineering of Kane's Wrath game binaries.
 - Platform: 32-bit Windows game process; the DLL can be cross-compiled on
   macOS with Zig.
 - Supported client rates: 45 and 90 FPS.
-- Signature resolution has been verified against the Steam 2012 and EA/Origin-
-  era 2009 Kane's Wrath 1.02 executables, plus Kane's Wrath 1.03 (2025).
-- The Steam and 2009 1.02 binaries are already Large Address Aware. The
-  resolver ignores checksum and LAA-header differences, so an otherwise
-  identical NTCore-patched executable uses the same code signatures.
-- The 2009 and 1.03 builds still need Windows gameplay testing; the Steam 2012
-  build remains the primary tested target.
+- The DLL does not select compatibility from timestamps, checksums, image
+  sizes, distribution names, or a hardcoded executable version. Every required
+  engine site is resolved from a masked signature and validated semantically.
+- Signature resolution has been verified against several Steam, EA, and
+  community Kane's Wrath executable layouts. Non-Steam layouts still need
+  broader Windows gameplay testing.
 - Tiberium Wars is not supported yet.
 - Multiplayer and replay determinism still require runtime validation before
   the patch should be treated as online-safe.

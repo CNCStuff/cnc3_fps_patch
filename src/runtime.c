@@ -1,7 +1,7 @@
 #include "runtime.h"
 
 #include "config.h"
-#include "game_1_02.h"
+#include "game_layout.h"
 #include "log.h"
 #include "memory_patch.h"
 
