@@ -217,18 +217,6 @@ static void kw_install_particle_and_cursor_timing(KwPatchInstaller *installer) {
     kw_expect_bytes(installer, "radius-cursor throb instruction",
                     visual->radius_cursor_fps_instruction,
                     radius_opcode, sizeof(radius_opcode));
-    /*
-     * Known KW builds store this cached 30/1000 value in zero-initialized data
-     * and fill it during executable CRT startup. Bootstrap resolution can run
-     * before that initializer; this later hook is the first safe place to
-     * verify the expected 0.03f value.
-     */
-    if (installer->ok &&
-        kw_load_u32(kw_game_address(
-            g_game, visual->retail_frames_per_millisecond)) != 0x3CF5C28Fu) {
-        kw_log_line("ERROR: retail frames-per-millisecond value is not 0.03");
-        installer->ok = FALSE;
-    }
     kw_patch_pointer(installer, "radius-cursor frames-per-millisecond operand",
                      visual->radius_cursor_fps_operand,
                      kw_game_address(g_game, visual->retail_frames_per_millisecond),

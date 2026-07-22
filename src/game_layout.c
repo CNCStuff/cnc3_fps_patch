@@ -110,6 +110,15 @@ static const kw_u16 g_float_initializer_pattern[] = {
     0xD9, 0x1D, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
     0x59, 0xC3
 };
+static const kw_u16 g_frames_per_millisecond_initializer_pattern[] = {
+    0x51, 0xA1, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
+    0xDB, 0x05, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
+    0x85, 0xC0, 0x7D, 0x06, 0xD8, 0x05,
+    KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
+    0xD8, 0x0D, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
+    0xD9, 0x1D, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
+    0x59, 0xC3
+};
 static const kw_u16 g_seconds_initializer_pattern[] = {
     0xF3, 0x0F, 0x10, 0x05,
     KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
@@ -372,6 +381,20 @@ static BOOL kw_resolve_cached_timing_values(
         kw_load_u32(module + initializer + 8u) != source_address ||
         !kw_read_absolute_rva(module, game->pe_size_of_image, initializer + 30u,
                               &timing->audio_milliseconds_per_frame)) {
+        return FALSE;
+    }
+    /*
+     * Prove the radius operand names the FPS-derived cache by following its
+     * initializer. The cache's live value depends on initialization order and
+     * is intentionally not used as build identity.
+     */
+    if (!kw_find_signature_using_absolute_operand(
+            module, nt, g_frames_per_millisecond_initializer_pattern,
+            KW_ARRAY_COUNT(g_frames_per_millisecond_initializer_pattern),
+            2u, source_address, &initializer) ||
+        kw_load_u32(module + initializer + 8u) != source_address ||
+        kw_load_u32(module + initializer + 30u) !=
+            (kw_u32)(uintptr_t)(module + game->visual.retail_frames_per_millisecond)) {
         return FALSE;
     }
 
