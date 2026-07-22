@@ -64,66 +64,26 @@ jobs:
           name: kw-fps-patch-${{ github.sha }}
           path: dist
 
-      - name: Check that this is still the newest main commit
-        id: head
+      - name: Refresh latest build release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
-          if [ "$head_sha" = "$GITHUB_SHA" ]; then
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping rolling release because main has advanced to $head_sha"
+          if [ "$head_sha" != "$GITHUB_SHA" ]; then
+            echo "Skipping release because main has advanced to $head_sha"
+            exit 0
           fi
 
-      - name: Update latest release
-        if: steps.head.outputs.publish == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cat > release-notes.md <<EOF
-          Automated build of commit \`$GITHUB_SHA\`.
-          EOF
+          # Recreate instead of editing so GitHub shows this build's date.
+          gh release delete continuous \
+            --repo "$GITHUB_REPOSITORY" \
+            --cleanup-tag \
+            --yes 2>/dev/null || true
 
-          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/continuous" >/dev/null 2>&1; then
-            gh api --method PATCH \
-              "repos/${GITHUB_REPOSITORY}/git/refs/tags/continuous" \
-              -f sha="$GITHUB_SHA" \
-              -F force=true >/dev/null
-          else
-            gh api --method POST \
-              "repos/${GITHUB_REPOSITORY}/git/refs" \
-              -f ref="refs/tags/continuous" \
-              -f sha="$GITHUB_SHA" >/dev/null
-          fi
-
-          if gh release view continuous --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit continuous \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "Latest automated build" \
-              --notes-file release-notes.md \
-              --prerelease=false \
-              --latest
-
-            gh release view continuous \
-              --repo "$GITHUB_REPOSITORY" \
-              --json assets \
-              --jq '.assets[].name' | while IFS= read -r asset; do
-                gh release delete-asset continuous "$asset" \
-                  --repo "$GITHUB_REPOSITORY" \
-                  --yes
-              done
-
-            gh release upload continuous \
-              --repo "$GITHUB_REPOSITORY" \
-              dist/kw-fps-patch.zip
-          else
-            gh release create continuous \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "Latest automated build" \
-              --notes-file release-notes.md \
-              --latest \
-              dist/kw-fps-patch.zip
-          fi
+          gh release create continuous \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Latest automated build" \
+            --notes "Automated build of commit \`$GITHUB_SHA\`." \
+            --latest \
+            dist/kw-fps-patch.zip
