@@ -34,6 +34,8 @@ on reverse engineering of Kane's Wrath game binaries.
 - Keeps frame-counted tracers, legacy particles, clouds/lightning, and Anim2D
   on their authored 30 Hz timebase.
 - Keeps GPU particle creation and expiration on the same 30 Hz timebase.
+- Keeps ability-placement radius-cursor opacity pulses at their XML-authored
+  millisecond duration.
 - Sets the audio client-frame cache to `1000/targetFPS` milliseconds so
   XML-authored sound delays retain their real-time duration.
 - Removes the independent display-side 29 ms wait.
@@ -64,6 +66,14 @@ target_fps=45
 ```
 
 Only `90` and `45` are accepted.
+
+## Source layout
+
+- `game_layout.c`: signature scanning and resolved engine addresses.
+- `game_patches.c`: visual-time validation and transactional code patches.
+- `frame_pacer.c`: QPC deadline pacing and its small generated x86 stub.
+- `runtime.c`: configuration, live timing state, and bootstrap/session hooks.
+- `memory_patch.c`: protected writes, branch encoding, and rollback support.
 
 ## Build on macOS
 

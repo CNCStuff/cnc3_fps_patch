@@ -3,6 +3,16 @@
 
 #include "kw_common.h"
 
+typedef struct KwConfig {
+    BOOL enabled;
+    kw_u32 target_fps;
+    BOOL precise_pacing;
+    kw_u32 spin_threshold_us;
+    BOOL logging;
+} KwConfig;
+
+extern KwConfig g_kw_config;
+
 void kw_config_set_defaults(KwConfig *config);
 BOOL kw_config_load(KwConfig *config, const wchar_t *path);
 

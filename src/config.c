@@ -1,5 +1,7 @@
 #include "config.h"
 
+KwConfig g_kw_config;
+
 void kw_config_set_defaults(KwConfig *config) {
     config->enabled = TRUE;
     config->target_fps = 90;

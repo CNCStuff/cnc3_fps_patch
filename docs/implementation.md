@@ -263,7 +263,8 @@ direct fallback when isolating QPC pacing behavior.
   invariants are validated before the first static visual write.
 - ASLR-adjusted absolute operands are validated against the loaded module base.
 - Code writes use `VirtualProtect` and `FlushInstructionCache`.
-- Static visual writes have best-effort rollback if a later write fails.
+- Bootstrap and static visual writes use patch transactions that capture the
+  original bytes and roll back in reverse order if a later write fails.
 - A failure disables further patch work while DirectInput forwarding remains
   available.
 - The proxy is process-lifetime state and is not designed for hot unloading.

@@ -4,6 +4,8 @@ TARGET := x86-windows-gnu
 SOURCES := \
 	src/kw_common.c \
 	src/game_layout.c \
+	src/game_patches.c \
+	src/frame_pacer.c \
 	src/memory_patch.c \
 	src/config.c \
 	src/log.c \

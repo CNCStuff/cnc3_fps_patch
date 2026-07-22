@@ -2,7 +2,6 @@
 
 HMODULE g_kw_self_module;
 kw_u8 *g_kw_game_module;
-KwConfig g_kw_config;
 
 void *memcpy(void *destination, const void *source, size_t size) {
     kw_u8 *out = (kw_u8 *)destination;
@@ -44,6 +43,12 @@ int memcmp(const void *left, const void *right, size_t size) {
         ++b;
     }
     return 0;
+}
+
+kw_u32 kw_load_u32(const void *address) {
+    kw_u32 value;
+    memcpy(&value, address, sizeof(value));
+    return value;
 }
 
 size_t kw_ascii_length(const char *text) {

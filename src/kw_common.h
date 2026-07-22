@@ -27,23 +27,15 @@ typedef uint32_t kw_u32;
 typedef uint64_t kw_u64;
 typedef int32_t kw_i32;
 
-typedef struct KwConfig {
-    BOOL enabled;
-    kw_u32 target_fps;
-    BOOL precise_pacing;
-    kw_u32 spin_threshold_us;
-    BOOL logging;
-} KwConfig;
-
 extern HMODULE g_kw_self_module;
 extern kw_u8 *g_kw_game_module;
-extern KwConfig g_kw_config;
 
 void *memcpy(void *destination, const void *source, size_t size);
 void *memmove(void *destination, const void *source, size_t size);
 void *memset(void *destination, int value, size_t size);
 int memcmp(const void *left, const void *right, size_t size);
 
+kw_u32 kw_load_u32(const void *address);
 size_t kw_ascii_length(const char *text);
 size_t kw_wide_length(const wchar_t *text);
 BOOL kw_wide_copy(wchar_t *destination, size_t capacity, const wchar_t *source);

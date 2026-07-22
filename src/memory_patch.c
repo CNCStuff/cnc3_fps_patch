@@ -12,14 +12,6 @@ BOOL kw_write_protected(void *destination, const void *source, size_t size) {
     return TRUE;
 }
 
-BOOL kw_write_relative_branch(kw_u8 *instruction, kw_u8 opcode, const void *target) {
-    kw_u8 patch[5];
-    intptr_t displacement = (const kw_u8 *)target - (instruction + 5);
-    patch[0] = opcode;
-    *(kw_i32 *)&patch[1] = (kw_i32)displacement;
-    return kw_write_protected(instruction, patch, sizeof(patch));
-}
-
 BOOL kw_allocate_executable_stub(size_t size, kw_u8 **out_stub) {
     void *memory;
     if (out_stub == NULL) {
@@ -39,4 +31,44 @@ BOOL kw_finalize_executable_stub(kw_u8 *stub, size_t size) {
         return FALSE;
     }
     return FlushInstructionCache(GetCurrentProcess(), stub, size);
+}
+
+void kw_encode_u32(kw_u8 *destination, kw_u32 value) {
+    destination[0] = (kw_u8)value;
+    destination[1] = (kw_u8)(value >> 8);
+    destination[2] = (kw_u8)(value >> 16);
+    destination[3] = (kw_u8)(value >> 24);
+}
+
+void kw_encode_rel32(kw_u8 *operand, const kw_u8 *next_instruction, const void *target) {
+    intptr_t displacement = (const kw_u8 *)target - next_instruction;
+    kw_encode_u32(operand, (kw_u32)(kw_i32)displacement);
+}
+
+void kw_patch_transaction_init(KwPatchTransaction *transaction) {
+    transaction->count = 0;
+}
+
+BOOL kw_patch_transaction_write(KwPatchTransaction *transaction,
+                                void *destination, const void *replacement, size_t size) {
+    KwPatchRecord *record;
+    if (transaction == NULL || destination == NULL || replacement == NULL || size == 0 ||
+        size > KW_PATCH_MAX_BYTES || transaction->count >= KW_PATCH_TRANSACTION_CAPACITY) {
+        return FALSE;
+    }
+    record = &transaction->records[transaction->count];
+    record->destination = destination;
+    record->size = size;
+    memcpy(record->original, destination, size);
+    if (!kw_write_protected(destination, replacement, size)) return FALSE;
+    ++transaction->count;
+    return TRUE;
+}
+
+void kw_patch_transaction_rollback(KwPatchTransaction *transaction) {
+    if (transaction == NULL) return;
+    while (transaction->count != 0) {
+        KwPatchRecord *record = &transaction->records[--transaction->count];
+        kw_write_protected(record->destination, record->original, record->size);
+    }
 }
