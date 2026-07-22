@@ -69,10 +69,13 @@ Only `90` and `45` are accepted.
 
 ## Source layout
 
-- `game_layout.c`: signature scanning and resolved engine addresses.
-- `game_patches.c`: visual-time validation and transactional code patches.
+- `game_layout.c`: each signature is defined once, then resolved directly into
+  a typed game layout grouped by subsystem.
+- `game_patches.c`: a linear, grouped installer that validates each site at
+  the write and rolls the transaction back on failure.
 - `frame_pacer.c`: QPC deadline pacing and its small generated x86 stub.
-- `runtime.c`: configuration, live timing state, and bootstrap/session hooks.
+- `runtime.c`: the single owner of configuration, resolved game state, and the
+  bootstrap/session lifecycle.
 - `memory_patch.c`: protected writes, branch encoding, and rollback support.
 
 ## Build on macOS

@@ -11,8 +11,6 @@ typedef struct KwConfig {
     BOOL logging;
 } KwConfig;
 
-extern KwConfig g_kw_config;
-
 void kw_config_set_defaults(KwConfig *config);
 BOOL kw_config_load(KwConfig *config, const wchar_t *path);
 

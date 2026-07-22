@@ -62,8 +62,9 @@ RVA 0x000A6C5E  laser visual step operand
 RVA 0x000BE145  scripted-model transition step operand
 ```
 
-The instruction opcodes and relocated retail operand are validated before any
-of the three writes occur.
+Each instruction operand is checked against the relocated retail address at
+the point it is replaced. All three writes share one transaction, so a later
+mismatch or write failure restores the earlier operands.
 
 ## Frame-counted FX compatibility
 
@@ -260,7 +261,8 @@ direct fallback when isolating QPC pacing behavior.
 
 - Every required signature must match exactly once.
 - Derived call targets, absolute operands, related globals, and retail timing
-  invariants are validated before the first static visual write.
+  invariants are validated while resolving the executable layout.
+- Each runtime patch site is checked again immediately before its write.
 - ASLR-adjusted absolute operands are validated against the loaded module base.
 - Code writes use `VirtualProtect` and `FlushInstructionCache`.
 - Bootstrap and static visual writes use patch transactions that capture the

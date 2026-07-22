@@ -2,8 +2,12 @@
 
 #define KW_PATTERN_ANY 0x100u
 
-KwGameLayout g_kw_game_layout;
-
+/*
+ * Signatures are deliberately kept next to the resolver below. Each one is
+ * scanned once and immediately assigned to the field that consumes it; there
+ * is no parallel ID enum, registry table, or untyped matches array to keep in
+ * sync.
+ */
 static const kw_u16 g_runtime_tail_pattern[] = {
     0x01, 0x88, 0x04, 0x0C, 0x00, 0x00, 0x8B, 0x0D,
     KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
@@ -115,54 +119,6 @@ static const kw_u16 g_seconds_initializer_pattern[] = {
     KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, 0xC3
 };
 
-typedef enum KwSignatureId {
-    KW_SIG_RUNTIME_TAIL,
-    KW_SIG_SESSION_TAIL,
-    KW_SIG_CAMERA,
-    KW_SIG_LASER,
-    KW_SIG_MODEL,
-    KW_SIG_TRACER_RESET,
-    KW_SIG_TRACER_UPDATE,
-    KW_SIG_CLOUD,
-    KW_SIG_ANIM2D_TIMESTAMP,
-    KW_SIG_ANIM2D_UPDATE,
-    KW_SIG_PARTICLE,
-    KW_SIG_GPU_PARTICLE,
-    KW_SIG_RADIUS_CURSOR,
-    KW_SIG_DISPLAY,
-    KW_SIG_PACING,
-    KW_SIG_HISTORY,
-    KW_SIG_COUNT
-} KwSignatureId;
-
-typedef struct KwSignatureSpec {
-    const kw_u16 *pattern;
-    size_t size;
-} KwSignatureSpec;
-
-#define KW_SIGNATURE(pattern_name) {pattern_name, KW_ARRAY_COUNT(pattern_name)}
-
-static const KwSignatureSpec g_core_signatures[KW_SIG_COUNT] = {
-    [KW_SIG_RUNTIME_TAIL] = KW_SIGNATURE(g_runtime_tail_pattern),
-    [KW_SIG_SESSION_TAIL] = KW_SIGNATURE(g_session_tail_pattern),
-    [KW_SIG_CAMERA] = KW_SIGNATURE(g_camera_pattern),
-    [KW_SIG_LASER] = KW_SIGNATURE(g_laser_pattern),
-    [KW_SIG_MODEL] = KW_SIGNATURE(g_model_pattern),
-    [KW_SIG_TRACER_RESET] = KW_SIGNATURE(g_tracer_reset_pattern),
-    [KW_SIG_TRACER_UPDATE] = KW_SIGNATURE(g_tracer_update_pattern),
-    [KW_SIG_CLOUD] = KW_SIGNATURE(g_cloud_pattern),
-    [KW_SIG_ANIM2D_TIMESTAMP] = KW_SIGNATURE(g_anim2d_set_pattern),
-    [KW_SIG_ANIM2D_UPDATE] = KW_SIGNATURE(g_anim2d_update_pattern),
-    [KW_SIG_PARTICLE] = KW_SIGNATURE(g_particle_pattern),
-    [KW_SIG_GPU_PARTICLE] = KW_SIGNATURE(g_gpu_pattern),
-    [KW_SIG_RADIUS_CURSOR] = KW_SIGNATURE(g_radius_cursor_throb_pattern),
-    [KW_SIG_DISPLAY] = KW_SIGNATURE(g_display_pattern),
-    [KW_SIG_PACING] = KW_SIGNATURE(g_pacing_pattern),
-    [KW_SIG_HISTORY] = KW_SIGNATURE(g_history_pattern)
-};
-
-#undef KW_SIGNATURE
-
 static BOOL kw_get_nt_headers(kw_u8 *module, IMAGE_NT_HEADERS32 **out_nt) {
     IMAGE_DOS_HEADER *dos;
     IMAGE_NT_HEADERS32 *nt;
@@ -181,11 +137,6 @@ static BOOL kw_get_nt_headers(kw_u8 *module, IMAGE_NT_HEADERS32 **out_nt) {
     }
     *out_nt = nt;
     return TRUE;
-}
-
-BOOL kw_validate_game_pe_headers(kw_u8 *module) {
-    IMAGE_NT_HEADERS32 *nt;
-    return kw_get_nt_headers(module, &nt);
 }
 
 static BOOL kw_pattern_matches(const kw_u8 *bytes, const kw_u16 *pattern, size_t size) {
@@ -273,155 +224,192 @@ static BOOL kw_decode_relative_target(kw_u8 *module, kw_u32 image_size,
     return TRUE;
 }
 
-BOOL kw_resolve_game_layout(kw_u8 *module) {
-    IMAGE_NT_HEADERS32 *nt;
-    KwGameLayout layout;
-    kw_u32 matches[KW_SIG_COUNT];
+#define KW_FIND_UNIQUE(module, nt, pattern, out_rva) \
+    kw_find_unique_signature((module), (nt), (pattern), KW_ARRAY_COUNT(pattern), (out_rva))
+
+static BOOL kw_resolve_bootstrap_sites(
+    kw_u8 *module, IMAGE_NT_HEADERS32 *nt, KwGameLayout *game) {
+    kw_u32 match;
+
+    if (!KW_FIND_UNIQUE(module, nt, g_runtime_tail_pattern, &match)) return FALSE;
+    game->bootstrap.runtime_config_tail.instruction = match + 12u;
+    if (!kw_decode_relative_target(module, game->pe_size_of_image,
+                                   game->bootstrap.runtime_config_tail.instruction, 0xE8,
+                                   &game->bootstrap.runtime_config_tail.target)) {
+        return FALSE;
+    }
+
+    if (!KW_FIND_UNIQUE(module, nt, g_session_tail_pattern, &match)) return FALSE;
+    game->bootstrap.start_session_tail.instruction = match + 13u;
+    return kw_decode_relative_target(module, game->pe_size_of_image,
+                                     game->bootstrap.start_session_tail.instruction, 0xE9,
+                                     &game->bootstrap.start_session_tail.target);
+}
+
+static BOOL kw_resolve_visual_sites(
+    kw_u8 *module, IMAGE_NT_HEADERS32 *nt, KwGameLayout *game) {
+    KwVisualLayout *visual = &game->visual;
+    kw_u32 match;
+    kw_u32 retail_step_address;
+
+    if (!KW_FIND_UNIQUE(module, nt, g_camera_pattern, &match)) return FALSE;
+    visual->camera_step_operand = match + 11u;
+    if (!KW_FIND_UNIQUE(module, nt, g_laser_pattern, &match)) return FALSE;
+    visual->laser_step_operand = match + 7u;
+    if (!KW_FIND_UNIQUE(module, nt, g_model_pattern, &match)) return FALSE;
+    visual->model_step_operand = match + 17u;
+
+    if (!KW_FIND_UNIQUE(module, nt, g_tracer_reset_pattern, &visual->tracer_reset_frame_call) ||
+        !KW_FIND_UNIQUE(module, nt, g_tracer_update_pattern, &visual->tracer_update_frame_call) ||
+        !KW_FIND_UNIQUE(module, nt, g_cloud_pattern, &visual->cloud_frame_call)) {
+        return FALSE;
+    }
+    if (!KW_FIND_UNIQUE(module, nt, g_anim2d_set_pattern, &match)) return FALSE;
+    visual->anim2d_timestamp_frame_call = match + 10u;
+    if (!KW_FIND_UNIQUE(module, nt, g_anim2d_update_pattern, &match)) return FALSE;
+    visual->anim2d_update_frame_call = match + 6u;
+
+    if (!KW_FIND_UNIQUE(module, nt, g_particle_pattern, &match)) return FALSE;
+    visual->particle_simulation.instruction = match + 2u;
+    if (!kw_decode_relative_target(module, game->pe_size_of_image,
+                                   visual->particle_simulation.instruction, 0xE8,
+                                   &visual->particle_simulation.target)) {
+        return FALSE;
+    }
+
+    if (!KW_FIND_UNIQUE(module, nt, g_gpu_pattern, &match)) return FALSE;
+    visual->gpu_particle_fps_instruction = match + 5u;
+    visual->gpu_particle_fps_operand = match + 8u;
+    if (!kw_read_absolute_rva(module, game->pe_size_of_image,
+                              visual->gpu_particle_fps_operand,
+                              &game->timing.client_fps) ||
+        game->timing.client_fps < 4u) {
+        return FALSE;
+    }
+    game->timing.logic_fps = game->timing.client_fps - 4u;
+
+    if (!KW_FIND_UNIQUE(module, nt, g_radius_cursor_throb_pattern, &match)) return FALSE;
+    visual->radius_cursor_fps_instruction = match + 20u;
+    visual->radius_cursor_fps_operand = match + 22u;
+    if (!kw_read_absolute_rva(module, game->pe_size_of_image,
+                              visual->radius_cursor_fps_operand,
+                              &visual->retail_frames_per_millisecond) ||
+        kw_load_u32(module + visual->retail_frames_per_millisecond) != 0x3CF5C28Fu ||
+        !kw_read_absolute_rva(module, game->pe_size_of_image,
+                              visual->camera_step_operand, &visual->retail_step)) {
+        return FALSE;
+    }
+
+    retail_step_address = (kw_u32)(uintptr_t)(module + visual->retail_step);
+    return kw_load_u32(module + visual->laser_step_operand) == retail_step_address &&
+           kw_load_u32(module + visual->model_step_operand) == retail_step_address;
+}
+
+static BOOL kw_resolve_pacing_sites(
+    kw_u8 *module, IMAGE_NT_HEADERS32 *nt, KwGameLayout *game) {
+    KwPacingLayout *pacing = &game->pacing;
+    kw_u32 match;
+    kw_i32 no_limit_path;
+
+    if (!KW_FIND_UNIQUE(module, nt, g_display_pattern, &match)) return FALSE;
+    pacing->display_limiter_branch = match + 3u;
+
+    if (!KW_FIND_UNIQUE(module, nt, g_pacing_pattern, &match)) return FALSE;
+    pacing->outer_gate = match + 11u;
+    if (!kw_read_absolute_rva(module, game->pe_size_of_image, match + 13u,
+                              &pacing->enforce_limit_flag) ||
+        !kw_read_absolute_rva(module, game->pe_size_of_image, match + 35u,
+                              &pacing->network_scale) ||
+        !kw_read_absolute_rva(module, game->pe_size_of_image, match + 41u,
+                              &pacing->milliseconds_per_logic_frame)) {
+        return FALSE;
+    }
+
+    if (!KW_FIND_UNIQUE(module, nt, g_history_pattern, &pacing->history_path)) return FALSE;
+    no_limit_path = (kw_i32)(pacing->outer_gate + 9u) +
+                    (int8_t)module[pacing->outer_gate + 8u];
+    if (no_limit_path < 0 || (kw_u32)no_limit_path >= game->pe_size_of_image) return FALSE;
+    pacing->no_limit_path = (kw_u32)no_limit_path;
+
+    if (!kw_read_absolute_rva(module, game->pe_size_of_image,
+                              pacing->display_limiter_branch + 11u,
+                              &game->timing.global_data_pointer) ||
+        game->timing.global_data_pointer != pacing->enforce_limit_flag + 0x47u ||
+        pacing->enforce_limit_flag < 0x27u) {
+        return FALSE;
+    }
+
+    game->timing.game_engine_pointer = pacing->enforce_limit_flag + 0x27u;
+    pacing->total_wait_ms = pacing->enforce_limit_flag + 0x13u;
+    pacing->last_wait_ms = pacing->enforce_limit_flag + 0x17u;
+    pacing->last_frame_duration_ms = pacing->enforce_limit_flag + 0x1Bu;
+    pacing->previous_frame_time_ms = pacing->enforce_limit_flag + 0x1Fu;
+    return TRUE;
+}
+
+static BOOL kw_resolve_cached_timing_values(
+    kw_u8 *module, IMAGE_NT_HEADERS32 *nt, KwGameLayout *game) {
+    KwTimingLayout *timing = &game->timing;
     kw_u32 initializer;
-    kw_u32 absolute;
-    kw_i32 short_target;
-    size_t i;
+    kw_u32 source_address = (kw_u32)(uintptr_t)(module + timing->client_fps);
 
-    if (!kw_get_nt_headers(module, &nt)) return FALSE;
-    memset(&layout, 0, sizeof(layout));
-    layout.build_name = "Kane's Wrath (signature-resolved)";
-    layout.pe_timestamp = nt->FileHeader.TimeDateStamp;
-    layout.pe_entry_rva = nt->OptionalHeader.AddressOfEntryPoint;
-    layout.pe_size_of_image = nt->OptionalHeader.SizeOfImage;
-
-    for (i = 0; i < KW_SIG_COUNT; ++i) {
-        const KwSignatureSpec *signature = &g_core_signatures[i];
-        if (!kw_find_unique_signature(module, nt, signature->pattern,
-                                      signature->size, &matches[i])) {
-            return FALSE;
-        }
-    }
-
-    layout.bootstrap.runtime_config_tail.instruction = matches[KW_SIG_RUNTIME_TAIL] + 12u;
-    layout.bootstrap.start_session_tail.instruction = matches[KW_SIG_SESSION_TAIL] + 13u;
-
-    layout.visual.camera_step_operand = matches[KW_SIG_CAMERA] + 11u;
-    layout.visual.laser_step_operand = matches[KW_SIG_LASER] + 7u;
-    layout.visual.model_step_operand = matches[KW_SIG_MODEL] + 17u;
-    layout.visual.tracer_reset_frame_call = matches[KW_SIG_TRACER_RESET];
-    layout.visual.tracer_update_frame_call = matches[KW_SIG_TRACER_UPDATE];
-    layout.visual.cloud_frame_call = matches[KW_SIG_CLOUD];
-    layout.visual.anim2d_timestamp_frame_call = matches[KW_SIG_ANIM2D_TIMESTAMP] + 10u;
-    layout.visual.anim2d_update_frame_call = matches[KW_SIG_ANIM2D_UPDATE] + 6u;
-    layout.visual.particle_simulation.instruction = matches[KW_SIG_PARTICLE] + 2u;
-    layout.visual.gpu_particle_fps_instruction = matches[KW_SIG_GPU_PARTICLE] + 5u;
-    layout.visual.gpu_particle_fps_operand = matches[KW_SIG_GPU_PARTICLE] + 8u;
-    layout.visual.radius_cursor_fps_instruction = matches[KW_SIG_RADIUS_CURSOR] + 20u;
-    layout.visual.radius_cursor_fps_operand = matches[KW_SIG_RADIUS_CURSOR] + 22u;
-
-    layout.pacing.display_limiter_branch = matches[KW_SIG_DISPLAY] + 3u;
-    layout.pacing.outer_gate = matches[KW_SIG_PACING] + 11u;
-    layout.pacing.history_path = matches[KW_SIG_HISTORY];
-
-    if (!kw_decode_relative_target(module, layout.pe_size_of_image,
-                                   layout.bootstrap.runtime_config_tail.instruction, 0xE8,
-                                   &layout.bootstrap.runtime_config_tail.target) ||
-        !kw_decode_relative_target(module, layout.pe_size_of_image,
-                                   layout.bootstrap.start_session_tail.instruction, 0xE9,
-                                   &layout.bootstrap.start_session_tail.target) ||
-        !kw_decode_relative_target(module, layout.pe_size_of_image,
-                                   layout.visual.particle_simulation.instruction, 0xE8,
-                                   &layout.visual.particle_simulation.target)) {
-        return FALSE;
-    }
-
-    if (!kw_read_absolute_rva(module, layout.pe_size_of_image,
-                              layout.visual.gpu_particle_fps_operand,
-                              &layout.timing.client_fps) ||
-        layout.timing.client_fps < 4u) {
-        return FALSE;
-    }
-    layout.timing.logic_fps = layout.timing.client_fps - 4u;
-    absolute = (kw_u32)(uintptr_t)(module + layout.timing.client_fps);
-
-    if (!kw_read_absolute_rva(module, layout.pe_size_of_image,
-                              layout.visual.radius_cursor_fps_operand,
-                              &layout.visual.retail_frames_per_millisecond) ||
-        kw_load_u32(module + layout.visual.retail_frames_per_millisecond) != 0x3CF5C28Fu ||
-        !kw_read_absolute_rva(module, layout.pe_size_of_image,
-                              layout.visual.camera_step_operand,
-                              &layout.visual.retail_step) ||
-        kw_load_u32(module + layout.visual.laser_step_operand) !=
-            (kw_u32)(uintptr_t)(module + layout.visual.retail_step) ||
-        kw_load_u32(module + layout.visual.model_step_operand) !=
-            (kw_u32)(uintptr_t)(module + layout.visual.retail_step)) {
-        return FALSE;
-    }
-
-    if (!kw_read_absolute_rva(module, layout.pe_size_of_image,
-                              matches[KW_SIG_PACING] + 13u,
-                              &layout.pacing.enforce_limit_flag) ||
-        !kw_read_absolute_rva(module, layout.pe_size_of_image,
-                              matches[KW_SIG_PACING] + 35u,
-                              &layout.pacing.network_scale) ||
-        !kw_read_absolute_rva(module, layout.pe_size_of_image,
-                              matches[KW_SIG_PACING] + 41u,
-                              &layout.pacing.milliseconds_per_logic_frame)) {
-        return FALSE;
-    }
-    short_target = (kw_i32)(layout.pacing.outer_gate + 9u) +
-                   (int8_t)module[layout.pacing.outer_gate + 8u];
-    if (short_target < 0 || (kw_u32)short_target >= layout.pe_size_of_image) return FALSE;
-    layout.pacing.no_limit_path = (kw_u32)short_target;
-
-    if (!kw_read_absolute_rva(module, layout.pe_size_of_image,
-                              layout.pacing.display_limiter_branch + 11u,
-                              &layout.timing.global_data_pointer) ||
-        layout.timing.global_data_pointer != layout.pacing.enforce_limit_flag + 0x47u ||
-        layout.pacing.enforce_limit_flag < 0x27u) {
-        return FALSE;
-    }
-    layout.timing.game_engine_pointer = layout.pacing.enforce_limit_flag + 0x27u;
-    layout.pacing.total_wait_ms = layout.pacing.enforce_limit_flag + 0x13u;
-    layout.pacing.last_wait_ms = layout.pacing.enforce_limit_flag + 0x17u;
-    layout.pacing.last_frame_duration_ms = layout.pacing.enforce_limit_flag + 0x1Bu;
-    layout.pacing.previous_frame_time_ms = layout.pacing.enforce_limit_flag + 0x1Fu;
-
-    if (!kw_find_unique_signature(module, nt, g_w3d_initializer_pattern,
-                                  KW_ARRAY_COUNT(g_w3d_initializer_pattern), &initializer) ||
-        kw_load_u32(module + initializer + 9u) != absolute ||
-        !kw_read_absolute_rva(module, layout.pe_size_of_image, initializer + 14u,
-                              &layout.timing.w3d_milliseconds_per_frame)) {
+    if (!KW_FIND_UNIQUE(module, nt, g_w3d_initializer_pattern, &initializer) ||
+        kw_load_u32(module + initializer + 9u) != source_address ||
+        !kw_read_absolute_rva(module, game->pe_size_of_image, initializer + 14u,
+                              &timing->w3d_milliseconds_per_frame)) {
         return FALSE;
     }
     if (!kw_find_signature_using_absolute_operand(
             module, nt, g_float_initializer_pattern,
-            KW_ARRAY_COUNT(g_float_initializer_pattern), 2u, absolute, &initializer) ||
-        kw_load_u32(module + initializer + 8u) != absolute ||
-        !kw_read_absolute_rva(module, layout.pe_size_of_image, initializer + 24u,
-                              &layout.timing.client_fps_float)) {
+            KW_ARRAY_COUNT(g_float_initializer_pattern), 2u, source_address, &initializer) ||
+        kw_load_u32(module + initializer + 8u) != source_address ||
+        !kw_read_absolute_rva(module, game->pe_size_of_image, initializer + 24u,
+                              &timing->client_fps_float)) {
         return FALSE;
     }
     if (!kw_find_signature_using_absolute_operand(
             module, nt, g_audio_initializer_pattern,
-            KW_ARRAY_COUNT(g_audio_initializer_pattern), 2u, absolute, &initializer) ||
-        kw_load_u32(module + initializer + 8u) != absolute ||
-        !kw_read_absolute_rva(module, layout.pe_size_of_image, initializer + 30u,
-                              &layout.timing.audio_milliseconds_per_frame)) {
+            KW_ARRAY_COUNT(g_audio_initializer_pattern), 2u, source_address, &initializer) ||
+        kw_load_u32(module + initializer + 8u) != source_address ||
+        !kw_read_absolute_rva(module, game->pe_size_of_image, initializer + 30u,
+                              &timing->audio_milliseconds_per_frame)) {
         return FALSE;
     }
 
-    absolute = (kw_u32)(uintptr_t)(module + layout.timing.client_fps_float);
-    if (!kw_find_signature_using_absolute_operand(
-            module, nt, g_seconds_initializer_pattern,
-            KW_ARRAY_COUNT(g_seconds_initializer_pattern), 12u, absolute, &initializer) ||
-        !kw_read_absolute_rva(module, layout.pe_size_of_image, initializer + 20u,
-                              &layout.timing.visual_seconds_per_frame)) {
-        return FALSE;
-    }
-
-    if (kw_load_u32(module + layout.timing.logic_fps) != 15u ||
-        kw_load_u32(module + layout.timing.client_fps) != 30u ||
-        module[layout.pacing.display_limiter_branch] != 0x7D ||
-        module[layout.pacing.display_limiter_branch + 1u] != 0x13) {
-        return FALSE;
-    }
-
-    g_kw_game_layout = layout;
-    return TRUE;
+    source_address = (kw_u32)(uintptr_t)(module + timing->client_fps_float);
+    return kw_find_signature_using_absolute_operand(
+               module, nt, g_seconds_initializer_pattern,
+               KW_ARRAY_COUNT(g_seconds_initializer_pattern), 12u, source_address,
+               &initializer) &&
+           kw_read_absolute_rva(module, game->pe_size_of_image, initializer + 20u,
+                                &timing->visual_seconds_per_frame);
 }
+
+KwGameResolveResult kw_resolve_game_layout(KwGameLayout *out_game, kw_u8 *module) {
+    IMAGE_NT_HEADERS32 *nt;
+    KwGameLayout game;
+
+    if (out_game == NULL || !kw_get_nt_headers(module, &nt)) return KW_GAME_INVALID_PE;
+    memset(&game, 0, sizeof(game));
+    game.module = module;
+    game.build_name = "Kane's Wrath (signature-resolved)";
+    game.pe_timestamp = nt->FileHeader.TimeDateStamp;
+    game.pe_entry_rva = nt->OptionalHeader.AddressOfEntryPoint;
+    game.pe_size_of_image = nt->OptionalHeader.SizeOfImage;
+
+    if (!kw_resolve_bootstrap_sites(module, nt, &game) ||
+        !kw_resolve_visual_sites(module, nt, &game) ||
+        !kw_resolve_pacing_sites(module, nt, &game) ||
+        !kw_resolve_cached_timing_values(module, nt, &game) ||
+        kw_load_u32(module + game.timing.logic_fps) != 15u ||
+        kw_load_u32(module + game.timing.client_fps) != 30u ||
+        module[game.pacing.display_limiter_branch] != 0x7D ||
+        module[game.pacing.display_limiter_branch + 1u] != 0x13) {
+        return KW_GAME_UNSUPPORTED_BUILD;
+    }
+
+    *out_game = game;
+    return KW_GAME_RESOLVED;
+}
+
+#undef KW_FIND_UNIQUE

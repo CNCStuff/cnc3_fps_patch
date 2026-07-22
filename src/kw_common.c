@@ -1,8 +1,5 @@
 #include "kw_common.h"
 
-HMODULE g_kw_self_module;
-kw_u8 *g_kw_game_module;
-
 void *memcpy(void *destination, const void *source, size_t size) {
     kw_u8 *out = (kw_u8 *)destination;
     const kw_u8 *in = (const kw_u8 *)source;

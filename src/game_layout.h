@@ -64,6 +64,7 @@ typedef struct KwPacingLayout {
  * through a second layer of preprocessor aliases.
  */
 typedef struct KwGameLayout {
+    kw_u8 *module;
     const char *build_name;
     kw_u32 pe_timestamp;
     kw_u32 pe_entry_rva;
@@ -73,6 +74,12 @@ typedef struct KwGameLayout {
     KwVisualLayout visual;
     KwPacingLayout pacing;
 } KwGameLayout;
+
+typedef enum KwGameResolveResult {
+    KW_GAME_RESOLVED,
+    KW_GAME_INVALID_PE,
+    KW_GAME_UNSUPPORTED_BUILD
+} KwGameResolveResult;
 
 enum {
     KW_ENGINE_MAX_UPDATE_FPS = 0x18,
@@ -87,13 +94,10 @@ enum {
     KW_GLOBAL_DATA_FPS_LIMIT = 0x54
 };
 
-extern KwGameLayout g_kw_game_layout;
-
-static inline kw_u8 *kw_game_address(kw_u32 rva) {
-    return g_kw_game_module + rva;
+static inline kw_u8 *kw_game_address(const KwGameLayout *game, kw_u32 rva) {
+    return game->module + rva;
 }
 
-BOOL kw_validate_game_pe_headers(kw_u8 *module);
-BOOL kw_resolve_game_layout(kw_u8 *module);
+KwGameResolveResult kw_resolve_game_layout(KwGameLayout *out_game, kw_u8 *module);
 
 #endif

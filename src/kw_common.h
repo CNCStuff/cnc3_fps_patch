@@ -27,9 +27,6 @@ typedef uint32_t kw_u32;
 typedef uint64_t kw_u64;
 typedef int32_t kw_i32;
 
-extern HMODULE g_kw_self_module;
-extern kw_u8 *g_kw_game_module;
-
 void *memcpy(void *destination, const void *source, size_t size);
 void *memmove(void *destination, const void *source, size_t size);
 void *memset(void *destination, int value, size_t size);
