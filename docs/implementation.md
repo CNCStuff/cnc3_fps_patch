@@ -134,6 +134,31 @@ Anim2D stores the current frame when it selects a sprite frame and later uses
 only the update read would mix raw and synthetic clocks and make the unsigned
 subtraction invalid.
 
+### Radius-cursor opacity throb
+
+Ability-placement overlays are `RadiusCursorLibrary` decals. Their XML defines
+an opacity range and a millisecond period, normally:
+
+```xml
+OpacityMin="30"
+OpacityMax="60"
+OpacityThrobTime="1000"
+```
+
+`RadiusDecalInstance_UpdateForClientFrame` reads the raw client-frame number
+and converts `OpacityThrobTime` to a frame count by multiplying it by the
+shared retail constant `0.03 frames/ms`. At 90 FPS that makes a 1000 ms period
+only 30 frames, so it completes in roughly 333 ms.
+
+The multiplication operand at Steam 2012 RVA `0x00150F7B` is redirected to a
+DLL-owned `targetFPS / 1000` float. Thus 1000 ms becomes 45 frames at 45 FPS or
+90 frames at 90 FPS. The original shared `0.03` scalar is not changed because
+GPU particle creation intentionally uses a fixed 30-frame visual time domain.
+
+The remainder of the same radius-decal update already uses
+`g_visualSecondsPerClientFrame` for rotation, so it is covered by the existing
+live timing-cache update.
+
 The display limiter branch changes as follows:
 
 ```text

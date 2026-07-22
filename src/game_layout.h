@@ -43,6 +43,9 @@ typedef struct KwGameLayout {
     kw_u32 fx_particle_simulation_target;
     kw_u32 gpu_particle_frame_rate_instruction;
     kw_u32 gpu_particle_frame_rate_operand;
+    kw_u32 radius_cursor_throb_frame_rate_instruction;
+    kw_u32 radius_cursor_throb_frame_rate_operand;
+    kw_u32 legacy_visual_frames_per_millisecond;
 
     kw_u32 display_limiter_branch;
     kw_u32 outer_pacing_gate;
@@ -104,6 +107,12 @@ extern KwGameLayout g_kw_game_layout;
     (g_kw_game_layout.gpu_particle_frame_rate_instruction)
 #define KW_RVA_GPU_PARTICLE_FRAME_RATE_OPERAND \
     (g_kw_game_layout.gpu_particle_frame_rate_operand)
+#define KW_RVA_RADIUS_CURSOR_THROB_FRAME_RATE_INSTRUCTION \
+    (g_kw_game_layout.radius_cursor_throb_frame_rate_instruction)
+#define KW_RVA_RADIUS_CURSOR_THROB_FRAME_RATE_OPERAND \
+    (g_kw_game_layout.radius_cursor_throb_frame_rate_operand)
+#define KW_RVA_LEGACY_VISUAL_FRAMES_PER_MILLISECOND \
+    (g_kw_game_layout.legacy_visual_frames_per_millisecond)
 #define KW_RVA_DISPLAY_LIMITER_BRANCH (g_kw_game_layout.display_limiter_branch)
 #define KW_RVA_OUTER_PACING_GATE (g_kw_game_layout.outer_pacing_gate)
 #define KW_RVA_OUTER_PACING_NO_LIMIT (g_kw_game_layout.outer_pacing_no_limit)

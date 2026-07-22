@@ -12,6 +12,7 @@ static volatile LONG g_proxy_checkpoint_logged;
 static BOOL g_static_patches_installed;
 static BOOL g_runtime_disabled;
 static float g_visual_client_step;
+static float g_client_frames_per_millisecond;
 static kw_u32 g_visual_reference_fps = 30u;
 static kw_u32 g_fx_particle_update_accumulator;
 static kw_u8 *g_pacing_stub;
@@ -198,6 +199,7 @@ static BOOL kw_validate_runtime_patch_sites(void) {
     static const kw_u8 tracer_update_get_frame[6] = {0x8B, 0x01, 0x57, 0xFF, 0x50, 0x78};
     static const kw_u8 virtual_get_frame[5] = {0x8B, 0x01, 0xFF, 0x50, 0x78};
     static const kw_u8 gpu_particle_frame_rate_opcode[3] = {0x0F, 0xAF, 0x05};
+    static const kw_u8 radius_cursor_throb_frame_rate_opcode[2] = {0xD8, 0x0D};
     static const kw_u8 pacing_prefix[2] = {0x80, 0x3D};
     static const kw_u8 pacing_suffix[3] = {0x00, 0x74, 0x69};
     kw_u32 retail_visual = (kw_u32)(uintptr_t)(g_kw_game_module + KW_RVA_RETAIL_VISUAL_STEP);
@@ -255,6 +257,15 @@ static BOOL kw_validate_runtime_patch_sites(void) {
                                  KW_RVA_GPU_PARTICLE_FRAME_RATE_OPERAND,
                                  (kw_u32)(uintptr_t)(g_kw_game_module +
                                                     KW_RVA_CLIENT_UPDATE_FPS))) valid = FALSE;
+    if (!kw_validate_runtime_bytes("radius-cursor throb frame-rate instruction",
+                                   KW_RVA_RADIUS_CURSOR_THROB_FRAME_RATE_INSTRUCTION,
+                                   radius_cursor_throb_frame_rate_opcode,
+                                   sizeof(radius_cursor_throb_frame_rate_opcode))) valid = FALSE;
+    if (!kw_validate_runtime_u32(
+            "radius-cursor throb frames-per-millisecond operand",
+            KW_RVA_RADIUS_CURSOR_THROB_FRAME_RATE_OPERAND,
+            (kw_u32)(uintptr_t)(g_kw_game_module +
+                               KW_RVA_LEGACY_VISUAL_FRAMES_PER_MILLISECOND))) valid = FALSE;
     if (g_kw_config.precise_pacing) {
         if (!kw_validate_runtime_bytes("outer pacing gate opcode", KW_RVA_OUTER_PACING_GATE,
                                        pacing_prefix, sizeof(pacing_prefix))) valid = FALSE;
@@ -287,7 +298,12 @@ static BOOL kw_install_static_patches(void) {
     kw_u32 retail_visual = (kw_u32)(uintptr_t)(g_kw_game_module + KW_RVA_RETAIL_VISUAL_STEP);
     kw_u32 replacement_visual = (kw_u32)(uintptr_t)&g_visual_client_step;
     kw_u32 retail_client_fps = (kw_u32)(uintptr_t)(g_kw_game_module + KW_RVA_CLIENT_UPDATE_FPS);
+    kw_u32 retail_legacy_frames_per_millisecond =
+        (kw_u32)(uintptr_t)(g_kw_game_module +
+                            KW_RVA_LEGACY_VISUAL_FRAMES_PER_MILLISECOND);
     kw_u32 replacement_reference_fps = (kw_u32)(uintptr_t)&g_visual_reference_fps;
+    kw_u32 replacement_client_frames_per_millisecond =
+        (kw_u32)(uintptr_t)&g_client_frames_per_millisecond;
     kw_store_u32(&pacing_original[2],
                  (kw_u32)(uintptr_t)(g_kw_game_module + KW_RVA_ENFORCE_FPS_LIMIT_THIS_FRAME));
     BOOL camera_written = FALSE, laser_written = FALSE, model_written = FALSE;
@@ -295,6 +311,7 @@ static BOOL kw_install_static_patches(void) {
     BOOL cloud_effect_written = FALSE;
     BOOL anim2d_set_frame_written = FALSE, anim2d_update_written = FALSE;
     BOOL fx_particle_written = FALSE, gpu_particle_written = FALSE;
+    BOOL radius_cursor_throb_written = FALSE;
     BOOL display_written = FALSE, pacing_written = FALSE;
 
     if (g_static_patches_installed) return TRUE;
@@ -314,6 +331,7 @@ static BOOL kw_install_static_patches(void) {
     }
 
     g_visual_client_step = 1.0f / (float)g_kw_config.target_fps;
+    g_client_frames_per_millisecond = (float)g_kw_config.target_fps / 1000.0f;
     if (!kw_write_protected(g_kw_game_module + KW_RVA_VISUAL_STEP_CAMERA_OPERAND,
                             &replacement_visual, sizeof(replacement_visual))) goto rollback;
     camera_written = TRUE;
@@ -394,6 +412,20 @@ static BOOL kw_install_static_patches(void) {
                             &replacement_reference_fps, sizeof(replacement_reference_fps))) goto rollback;
     gpu_particle_written = TRUE;
 
+    /*
+     * RadiusDecalInstance_UpdateForClientFrame converts the XML-authored
+     * OpacityThrobTime from milliseconds to a frame-counted period.  The
+     * retail operand points at 0.03 frames/ms, which is correct only while
+     * the raw client-frame counter advances at 30 Hz.  Redirect this one
+     * consumer to targetFPS/1000; do not change the shared retail scalar,
+     * because GPU particle creation intentionally remains in a 30 Hz domain.
+     */
+    if (!kw_write_protected(
+            g_kw_game_module + KW_RVA_RADIUS_CURSOR_THROB_FRAME_RATE_OPERAND,
+            &replacement_client_frames_per_millisecond,
+            sizeof(replacement_client_frames_per_millisecond))) goto rollback;
+    radius_cursor_throb_written = TRUE;
+
     if (!kw_write_protected(g_kw_game_module + KW_RVA_DISPLAY_LIMITER_BRANCH,
                             display_patch, sizeof(display_patch))) goto rollback;
     display_written = TRUE;
@@ -409,6 +441,7 @@ static BOOL kw_install_static_patches(void) {
     g_static_patches_installed = TRUE;
     kw_log_line("Static visual and limiter patches installed");
     kw_log_line("Frame-counted particles, tracers, clouds and Anim2D pinned to retail 30 Hz");
+    kw_log_line("Radius-cursor opacity throb converted using the live client FPS");
     return TRUE;
 
 rollback:
@@ -417,6 +450,10 @@ rollback:
                                            pacing_original, sizeof(pacing_original));
     if (display_written) kw_write_protected(g_kw_game_module + KW_RVA_DISPLAY_LIMITER_BRANCH,
                                             display_original, sizeof(display_original));
+    if (radius_cursor_throb_written) kw_write_protected(
+        g_kw_game_module + KW_RVA_RADIUS_CURSOR_THROB_FRAME_RATE_OPERAND,
+        &retail_legacy_frames_per_millisecond,
+        sizeof(retail_legacy_frames_per_millisecond));
     if (gpu_particle_written) kw_write_protected(
         g_kw_game_module + KW_RVA_GPU_PARTICLE_FRAME_RATE_OPERAND,
         &retail_client_fps, sizeof(retail_client_fps));

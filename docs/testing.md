@@ -27,6 +27,9 @@ Compare the same short skirmish against an unpatched 30 FPS run:
   duration while displaying additional rendered poses.
 - Muzzle flashes, lasers, particles, decals, radar fades, edge scrolling,
   sprite animation, and weather lightning must retain stock timing.
+- While targeting a player power or unit ability, the placement icon/radius
+  must retain its stock opacity pulse. The common XML value
+  `OpacityThrobTime="1000"` should remain a one-second cycle.
 - Stormrider weapon tracers and Overlord's Wrath must retain their stock sweep,
   emission, lifetime, trail, and impact timing.
 - Tiberium Vein Detonation's delayed shatter cue must align with the visible

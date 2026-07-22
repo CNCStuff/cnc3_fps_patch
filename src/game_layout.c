@@ -60,6 +60,13 @@ static const kw_u16 g_gpu_pattern[] = {
     0x0F, 0xAF, 0x05, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
     0x85, 0xC0, 0x89, 0x45, 0xFC, 0x56, 0x8B, 0xF1
 };
+static const kw_u16 g_radius_cursor_throb_pattern[] = {
+    0x8B, 0x0D, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
+    0x8B, 0x01, 0x57, 0xFF, 0x50, 0x78, 0x8B, 0xF8, 0x8B, 0x06,
+    0xD9, 0x40, 0x14, 0x51, 0xD8, 0x0D,
+    KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
+    0x51, 0xDD, 0x1C, 0x24
+};
 static const kw_u16 g_display_pattern[] = {
     0x83, 0xF9, 0x1D, 0x7D, 0x13, 0xE8
 };
@@ -245,6 +252,7 @@ BOOL kw_resolve_game_layout(kw_u8 *module) {
     KwGameLayout layout;
     kw_u32 runtime_match, session_match, camera_match, laser_match, model_match;
     kw_u32 anim_set_match, anim_update_match, particle_match, gpu_match;
+    kw_u32 radius_cursor_throb_match;
     kw_u32 display_match, pacing_match, history_match, initializer_match;
     kw_u32 absolute;
     kw_i32 short_target;
@@ -282,6 +290,9 @@ BOOL kw_resolve_game_layout(kw_u8 *module) {
                                   KW_ARRAY_COUNT(g_particle_pattern), &particle_match) ||
         !kw_find_unique_signature(module, nt, g_gpu_pattern,
                                   KW_ARRAY_COUNT(g_gpu_pattern), &gpu_match) ||
+        !kw_find_unique_signature(module, nt, g_radius_cursor_throb_pattern,
+                                  KW_ARRAY_COUNT(g_radius_cursor_throb_pattern),
+                                  &radius_cursor_throb_match) ||
         !kw_find_unique_signature(module, nt, g_display_pattern,
                                   KW_ARRAY_COUNT(g_display_pattern), &display_match) ||
         !kw_find_unique_signature(module, nt, g_pacing_pattern,
@@ -301,6 +312,8 @@ BOOL kw_resolve_game_layout(kw_u8 *module) {
     layout.fx_particle_simulation_call = particle_match + 2u;
     layout.gpu_particle_frame_rate_instruction = gpu_match + 5u;
     layout.gpu_particle_frame_rate_operand = gpu_match + 8u;
+    layout.radius_cursor_throb_frame_rate_instruction = radius_cursor_throb_match + 20u;
+    layout.radius_cursor_throb_frame_rate_operand = radius_cursor_throb_match + 22u;
     layout.display_limiter_branch = display_match + 3u;
     layout.outer_pacing_gate = pacing_match + 11u;
     layout.outer_pacing_history = history_match;
@@ -321,6 +334,12 @@ BOOL kw_resolve_game_layout(kw_u8 *module) {
                               layout.gpu_particle_frame_rate_operand,
                               &layout.client_update_fps) ||
         layout.client_update_fps < 4u) {
+        return FALSE;
+    }
+    if (!kw_read_absolute_rva(module, layout.pe_size_of_image,
+                              layout.radius_cursor_throb_frame_rate_operand,
+                              &layout.legacy_visual_frames_per_millisecond) ||
+        kw_read_u32(module + layout.legacy_visual_frames_per_millisecond) != 0x3CF5C28Fu) {
         return FALSE;
     }
     layout.logic_fps = layout.client_update_fps - 4u;
