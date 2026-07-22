@@ -1,0 +1,18 @@
+[kw_fps_patch]
+
+; Master switch. The dinput8 proxy still forwards normally when disabled.
+enabled=1
+
+; Supported values: 45 or 90. Default: 45.
+target_fps=45
+
+; 1 installs the QPC-based outer-loop pacer. 0 retains the game's rounded
+; integer-millisecond outer limiter after removing the separate 29 ms display wait.
+precise_pacing=1
+
+; Final busy-spin portion of the QPC wait. Lower values save CPU but can add
+; slightly more jitter. Valid range: 0..5000 microseconds.
+spin_threshold_us=400
+
+; Write kw_fps_patch.log next to the DLL.
+logging=1

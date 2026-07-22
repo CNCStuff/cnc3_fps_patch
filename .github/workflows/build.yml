@@ -1,0 +1,129 @@
+name: Build DLL
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Build and verify
+        run: make verify
+
+      - name: Prepare downloadable files
+        run: |
+          mkdir -p dist
+          cp zig-out/bin/dinput8.dll dist/dinput8.dll
+          cp kw_fps_patch.ini.example dist/kw_fps_patch.ini
+          cd dist
+          zip -9 kw-fps-patch.zip dinput8.dll kw_fps_patch.ini
+          rm dinput8.dll kw_fps_patch.ini
+
+      - name: Upload commit artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: kw-fps-patch-${{ github.sha }}
+          path: dist/kw-fps-patch.zip
+          if-no-files-found: error
+          retention-days: 90
+
+  publish:
+    name: Publish latest build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: continuous-release
+      cancel-in-progress: false
+
+    steps:
+      - name: Download verified artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: kw-fps-patch-${{ github.sha }}
+          path: dist
+
+      - name: Check that this is still the newest main commit
+        id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
+          if [ "$head_sha" = "$GITHUB_SHA" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping rolling release because main has advanced to $head_sha"
+          fi
+
+      - name: Update latest release
+        if: steps.head.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > release-notes.md <<EOF
+          Automated build of commit \`$GITHUB_SHA\`.
+          EOF
+
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/continuous" >/dev/null 2>&1; then
+            gh api --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/git/refs/tags/continuous" \
+              -f sha="$GITHUB_SHA" \
+              -F force=true >/dev/null
+          else
+            gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/continuous" \
+              -f sha="$GITHUB_SHA" >/dev/null
+          fi
+
+          if gh release view continuous --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit continuous \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Latest automated build" \
+              --notes-file release-notes.md \
+              --prerelease=false \
+              --latest
+
+            gh release view continuous \
+              --repo "$GITHUB_REPOSITORY" \
+              --json assets \
+              --jq '.assets[].name' | while IFS= read -r asset; do
+                gh release delete-asset continuous "$asset" \
+                  --repo "$GITHUB_REPOSITORY" \
+                  --yes
+              done
+
+            gh release upload continuous \
+              --repo "$GITHUB_REPOSITORY" \
+              dist/kw-fps-patch.zip
+          else
+            gh release create continuous \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Latest automated build" \
+              --notes-file release-notes.md \
+              --latest \
+              dist/kw-fps-patch.zip
+          fi
