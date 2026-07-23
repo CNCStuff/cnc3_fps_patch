@@ -1,170 +1,50 @@
-# Kane's Wrath fixed-rate FPS patch
+# FPS patch for Command & Conquer 3: Kane's Wrath
 
 [![Build DLL](https://github.com/CNCStuff/cnc3_fps_patch/actions/workflows/build.yml/badge.svg?branch=main&event=push)](https://github.com/CNCStuff/cnc3_fps_patch/actions/workflows/build.yml?query=branch%3Amain+event%3Apush)
 
-A 32-bit Windows `dinput8.dll` proxy that runs the Kane's Wrath client and
-render loop at **45 or 90 FPS** while retaining the stock **15 Hz authoritative
-logic rate**.
+This project is a DLL-based patch that changes multiple functions and constants
+in Kane's Wrath binary at runtime to make it possible to render the game at **45 or 90 FPS** compared to the default **30 FPS**.
+The actual simulation clock still ticks at the default 15Hz.
 
-The implementation and documentation are LLM-written by **GPT-5.6 Sol**, based
-on reverse engineering of Kane's Wrath game binaries.
+The patch is loaded through a DLL named `dinput8.dll` - that name is picked so that it's automatically loaded by the binary.
+It hooks the only dinput8 function that the game uses and passes it through.
 
-## Compatibility
+Reverse engineering of the game binary, the implementation and documentation were heavily LLM-assisted.
 
-- Platform: 32-bit Windows game process; the DLL can be cross-compiled on
-  macOS with Zig.
-- Supported client rates: 45 and 90 FPS.
-- The DLL does not select compatibility from timestamps, checksums, image
-  sizes, distribution names, or a hardcoded executable version. Every required
-  engine site is resolved from a masked signature and validated semantically.
-- Signature resolution has been verified against several Steam, EA, and
-  community Kane's Wrath executable layouts. Non-Steam layouts still need
-  broader Windows gameplay testing.
-- Tiberium Wars is not supported yet.
-- Multiplayer and replay determinism still require runtime validation before
-  the patch should be treated as online-safe.
+## Installation
+1. Download the newest release zip from [the automated build](https://github.com/CNCStuff/cnc3_fps_patch/releases/tag/continuous)
 
-## What it changes
+2. Find the directory with the `cnc3ep1.dat` that you want to patch. For example, if you're mainly playing KW 1.02, you'll want to
+    extract the archive contents into the `RetailExe\1.2` folder. If you use multiple versions, you need to drop the DLL and INI files into each version's folder.
 
-- Raises the complete client/update rate from 30 to 45 or 90 Hz.
-- Keeps `g_logicFPS` at 15 and preserves the six-phase logic scheduler.
-- Updates the reviewed visual seconds-per-frame and cached-FPS values without
-  overwriting the shared `1/30` constant used by pathfinding.
-- Uses a 22 ms W3D step at 45 FPS or an 11 ms step at 90 FPS.
-- Keeps frame-counted tracers, legacy particles, clouds/lightning, and Anim2D
-  on their authored 30 Hz timebase.
-- Keeps GPU particle creation and expiration on the same 30 Hz timebase.
-- Keeps ability-placement radius-cursor opacity pulses at their XML-authored
-  millisecond duration.
-- Sets the audio client-frame cache to `1000/targetFPS` milliseconds so
-  XML-authored sound delays retain their real-time duration.
-- Removes the independent display-side 29 ms wait.
-- Optionally replaces the rounded outer limiter with a QPC deadline pacer.
-- Reapplies live timing fields after runtime configuration and at each game
-  session start.
-
-The patch does not change the simulation rate, replace the phase scheduler,
-or support arbitrary display rates such as 60, 120, or 144 FPS.
+3. That's it! Now you can start the game and go into the campaign or skirmish, and the game will render at 90 FPS! If it doesn't, you can check the file named `kw_fps_patch.log` created in the same folder with the .dll and the .ini. If the `.log` file doesn't appear, you most likely put the `.dll` in the wrong folder - not the one with the game version that you're actually using. Remember to put the `.dll` and `.ini` next to the `.dat` file, not the main launcher `.exe`.
 
 ## Configuration
 
-The release ZIP already includes `kw_fps_patch.ini` with these settings:
-
-```ini
-[kw_fps_patch]
-enabled=1
-target_fps=90
-precise_pacing=1
-spin_threshold_us=400
-logging=1
-```
-
-To use 45 FPS instead, change one line and restart the game:
+The release ZIP includes `kw_fps_patch.ini` with the default 90 FPS and some other settings configured (including logging).
+You can open it in any text editor and modify it however you want. For example, to use 45 FPS instead of the default 90 FPS, change `target_fps`:
 
 ```ini
 target_fps=45
 ```
 
-Only `90` and `45` are accepted.
+## Current status
+There was limited gameplay testing, but so far:
 
-## Source layout
+- All animations play at the same usual speed.
 
-- `game_layout.c`: each signature is defined once, then resolved directly into
-  a typed game layout grouped by subsystem.
-- `game_patches.c`: a linear, grouped installer that validates each site at
-  the write and rolls the transaction back on failure.
-- `frame_pacer.c`: QPC deadline pacing and its small generated x86 stub.
-- `runtime.c`: the single owner of configuration, resolved game state, and the
-  bootstrap/session lifecycle.
-- `memory_patch.c`: protected writes, branch encoding, and rollback support.
+- Particle effects, ability decals work at normal speed. A lot of particle effects are authored to play at 30 FPS, so they might look a bit more "stuttery" even if they render at 90 FPS. This isn't something that the patch can fix directly.
 
-## Build on macOS
+- Audio delay is properly adjusted so that it matches with actual gameplay and visual effects.
 
-Requirements:
+### Multiplayer
+No proper multiplayer testing was done yet, so it'll be appreciated if you try! In theory, the patch should **not** cause any desyncs, and moreover, should work fine if only one player has the patch, while others play with the vanilla game. This is because the actual game logic still runs at the same speed.
 
-- Zig 0.16 or a compatible `zig cc` release
-- GNU or Apple Make
-- `objdump` and `file` for static verification
+But be aware that this is still beta-quality software: do not yet use it in important matches, official competitions and so on.
 
-Build and verify the release DLL:
+## Issues
 
-```sh
-make verify
-```
-
-Create a copy-ready package:
-
-```sh
-make package
-```
-
-Outputs:
-
-```text
-zig-out/bin/dinput8.dll
-zig-out/bin/dinput8-debug.dll
-zig-out/package/
-```
-
-Equivalent Zig commands:
-
-```sh
-zig build
-zig build verify
-zig build -Doptimize=Debug
-```
-
-The release DLL is CRT-free, targets the Windows 5.1 subsystem, and imports
-only `KERNEL32.dll` and `WINMM.dll` in addition to its DirectInput forwarding
-role.
-
-## Automated builds
-
-Every push and pull request produces a commit-specific GitHub Actions artifact:
-one ZIP containing `dinput8.dll` and the default INI. Successful commits on
-`main` also update the visible
-[latest automated build](https://github.com/CNCStuff/cnc3_fps_patch/releases/tag/continuous).
-
-## Install
-
-1. Locate the directory containing the actual `cnc3ep1.dat`, normally
-   `RetailExe\1.2`.
-2. Place `dinput8.dll` and `kw_fps_patch.ini` beside `cnc3ep1.dat`, not beside
-   the launcher executable.
-3. Start the game normally through its launcher.
-4. Read `kw_fps_patch.log` in the same directory.
-
-The proxy loads the real System32 `dinput8.dll`, forwards its DirectInput and
-COM exports, then installs the guarded game patches. Remove the DLL, INI, and
-log to uninstall.
-
-A successful installation should log entries resembling:
-
-```text
-bootstrap_status=1
-dinput8 proxy forwarding initialized
-Game hook reached: GameEngine_ApplyRuntimeConfiguration tail
-Static visual and limiter patches installed
-Frame-counted particles, tracers, clouds and Anim2D pinned to retail 30 Hz
-Applied client FPS=90
-Applied W3D milliseconds/client-frame=11
-```
-
-## Limitations
-
-- 90 FPS runs much of the UI, camera, draw-module, and rendering work three
-  times as often as retail, so CPU-bound scenes can still slow down.
-- Legacy particle simulation remains at 30 Hz. Rendering occurs at 45/90 Hz,
-  but some particle positions can repeat between simulation updates.
-- Truck-draw rotation damping is per-update, but shipped XML leaves its
-  frame-sensitive default at `1.0`; no speculative patch is installed.
-- Every required signature must resolve exactly once, and all derived branch
-  targets, operands, globals, and logic-rate invariants must agree before the
-  DLL modifies the process.
-- Proxy DLLs and runtime code patches may trigger generic antivirus warnings.
-
-See [docs/implementation.md](docs/implementation.md) for patch mechanics and
-[docs/testing.md](docs/testing.md) for focused runtime validation.
+PLease report any issues, such as crashes, animations or any other effects/gameplay going faster/slower than expected to https://github.com/CNCStuff/cnc3_fps_patch/issues. Feedback is appreciated!
 
 ## License
 
