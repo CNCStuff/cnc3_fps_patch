@@ -8,9 +8,15 @@ typedef struct KwBranchSite {
     kw_u32 target;
 } KwBranchSite;
 
+typedef enum KwRuntimeConfigHookKind {
+    KW_RUNTIME_CONFIG_HOOK_THISCALL,
+    KW_RUNTIME_CONFIG_HOOK_NOARG
+} KwRuntimeConfigHookKind;
+
 typedef struct KwBootstrapLayout {
     KwBranchSite runtime_config_tail;
     KwBranchSite start_session_tail;
+    KwRuntimeConfigHookKind runtime_config_hook_kind;
 } KwBootstrapLayout;
 
 typedef struct KwTimingLayout {

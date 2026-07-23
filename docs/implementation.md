@@ -19,8 +19,7 @@ During process attach it performs only these guarded operations:
 3. Decode relative call targets and absolute global operands from the matched
    instructions, then validate their relationships and the 15/30 Hz retail
    invariants.
-4. Redirect one existing tail call in
-   `GameEngine_ApplyRuntimeConfiguration` to a DLL wrapper.
+4. Redirect a late runtime-configuration call to the ABI-matched DLL wrapper.
 5. Redirect the tail jump in `GameEngine_StartGameSession` to another wrapper.
 
 Both wrappers call the original target first. The actual configuration,
@@ -29,9 +28,9 @@ outside the loader lock and after CRT initialization.
 
 ## Bootstrap redirections
 
-The following RVAs are examples from the Steam 2012 executable. The DLL no
-longer uses them as build identity: it resolves the equivalent sites from
-masked instruction signatures at startup.
+The following RVAs are examples from the Steam 2012 Kane's Wrath executable.
+The DLL no longer uses them as build identity: it resolves the equivalent
+sites from masked instruction signatures at startup.
 
 ```text
 RVA 0x0025368E
@@ -45,10 +44,19 @@ RVA 0x00255F95
   patch: JMP kw_start_session_tail_hook
 ```
 
-This avoids relocating arbitrary function prologues. The first wrapper keeps
-the original `__thiscall` ECX value, calls the original tail target, and then
-applies the FPS configuration. The session wrapper calls the original tail
-target, reapplies live fields, resets the 64-frame history, and re-arms pacing.
+This avoids relocating arbitrary function prologues. Kane's Wrath wraps the
+final `__thiscall` in its runtime-configuration method. Tiberium Wars has no
+equivalent final call, so its signature selects the nearby no-argument
+subsystem-checksum call; that wrapper preserves the original EAX result before
+the caller stores it. Both wrappers call the original target before applying
+the FPS configuration. The session wrapper calls the original tail target,
+reapplies live fields, resets the 64-frame history, and re-arms pacing.
+
+The two variants deliberately use separate signatures and wrapper prototypes.
+Matching Tiberium Wars must never reinterpret its no-argument call as the
+Kane's Wrath `__thiscall` site. Resolution also rejects an image if both
+bootstrap variants match, because silently choosing the wrong ABI would be
+unsafe.
 
 ## Static visual patches
 

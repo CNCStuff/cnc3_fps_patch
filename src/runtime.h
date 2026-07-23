@@ -14,6 +14,7 @@ typedef enum KwBootstrapStatus {
 BOOL kw_runtime_attach(HMODULE self_module, kw_u8 *game_module);
 void kw_runtime_proxy_checkpoint(void);
 int KW_THISCALL kw_runtime_config_tail_hook(void *original_this);
+int kw_runtime_config_noarg_hook(void);
 int kw_start_session_tail_hook(void);
 
 #endif

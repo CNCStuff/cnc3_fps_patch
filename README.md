@@ -1,9 +1,10 @@
-# FPS patch for Command & Conquer 3: Kane's Wrath
+# FPS patch for Command & Conquer 3: Tiberium Wars and Kane's Wrath
 
 [![Build DLL](https://github.com/CNCStuff/cnc3_fps_patch/actions/workflows/build.yml/badge.svg?branch=main&event=push)](https://github.com/CNCStuff/cnc3_fps_patch/actions/workflows/build.yml?query=branch%3Amain+event%3Apush)
 
 This project is a DLL-based patch that changes multiple functions and constants
-in Kane's Wrath binary at runtime to make it possible to render the game at **45 or 90 FPS** compared to the default **30 FPS**.
+in the Tiberium Wars or Kane's Wrath binary at runtime to make it possible to
+render the game at **45 or 90 FPS** compared to the default **30 FPS**.
 The actual simulation clock still ticks at the default 15Hz.
 
 The patch is loaded through a DLL named `dinput8.dll` - that name is picked so that it's automatically loaded by the binary.
@@ -14,8 +15,12 @@ Reverse engineering of the game binary, the implementation and documentation wer
 ## Installation
 1. Download the newest release zip from [the automated build](https://github.com/CNCStuff/cnc3_fps_patch/releases/tag/continuous)
 
-2. Find the directory with the `cnc3ep1.dat` that you want to patch. For example, if you're mainly playing KW 1.02, you'll want to
-    extract the archive contents into the `RetailExe\1.2` folder. If you use multiple versions, you need to drop the DLL and INI files into each version's folder.
+2. Find the directory with the game module that you want to patch:
+   - Kane's Wrath: the directory containing `cnc3ep1.dat`, such as `RetailExe\1.2`.
+   - Tiberium Wars: the directory containing `cnc3game.dat`, such as
+     `RetailExe\1.9` or `RetailExe\1.10`.
+   If you use multiple versions, place the DLL and INI files into each version's
+   directory.
 
 3. That's it! Now you can start the game and go into the campaign or skirmish, and the game will render at 90 FPS! If it doesn't, you can check the file named `kw_fps_patch.log` created in the same folder with the .dll and the .ini. If the `.log` file doesn't appear, you most likely put the `.dll` in the wrong folder - not the one with the game version that you're actually using. Remember to put the `.dll` and `.ini` next to the `.dat` file, not the main launcher `.exe`.
 

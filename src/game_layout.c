@@ -8,18 +8,34 @@
  * is no parallel ID enum, registry table, or untyped matches array to keep in
  * sync.
  */
-static const kw_u16 g_runtime_tail_pattern[] = {
+static const kw_u16 g_kw_runtime_tail_pattern[] = {
     0x01, 0x88, 0x04, 0x0C, 0x00, 0x00, 0x8B, 0x0D,
     KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
     0xE8, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
     0x5F, 0x5E, 0x5B, 0xC9, 0xC3
 };
-static const kw_u16 g_session_tail_pattern[] = {
+static const kw_u16 g_kw_session_tail_pattern[] = {
     0xE8, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
     0xE8, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
     0x5F, 0x5E, 0x5B,
     0xE9, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
     0x53, 0x55, 0x56, 0x57, 0x8B, 0x7C, 0x24, 0x14
+};
+static const kw_u16 g_tw_runtime_tail_pattern[] = {
+    0xE8, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
+    0x8B, 0x0D, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
+    0x89, 0x81, 0x04, 0x0C, 0x00, 0x00,
+    0xA1, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
+    0x8B, 0x0D, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
+    0x01, 0x88, 0x04, 0x0C, 0x00, 0x00,
+    0x5F, 0x5E, 0x5B, 0xC9, 0xC3
+};
+static const kw_u16 g_tw_session_tail_pattern[] = {
+    0xE8, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
+    0xE8, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
+    0x5F, 0x5E, 0x5B,
+    0xE9, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY, KW_PATTERN_ANY,
+    0x55, 0x56, 0x57, 0x8B, 0x7C, 0x24, 0x10
 };
 static const kw_u16 g_camera_pattern[] = {
     0x80, 0xBB, 0xC8, 0x00, 0x00, 0x00, 0x00, 0x75, 0x6F,
@@ -236,23 +252,74 @@ static BOOL kw_decode_relative_target(kw_u8 *module, kw_u32 image_size,
 #define KW_FIND_UNIQUE(module, nt, pattern, out_rva) \
     kw_find_unique_signature((module), (nt), (pattern), KW_ARRAY_COUNT(pattern), (out_rva))
 
-static BOOL kw_resolve_bootstrap_sites(
+static BOOL kw_resolve_kw_bootstrap_sites(
     kw_u8 *module, IMAGE_NT_HEADERS32 *nt, KwGameLayout *game) {
     kw_u32 match;
+    KwBranchSite runtime_config_tail;
+    KwBranchSite start_session_tail;
 
-    if (!KW_FIND_UNIQUE(module, nt, g_runtime_tail_pattern, &match)) return FALSE;
-    game->bootstrap.runtime_config_tail.instruction = match + 12u;
+    if (!KW_FIND_UNIQUE(module, nt, g_kw_runtime_tail_pattern, &match)) return FALSE;
+    runtime_config_tail.instruction = match + 12u;
     if (!kw_decode_relative_target(module, game->pe_size_of_image,
-                                   game->bootstrap.runtime_config_tail.instruction, 0xE8,
-                                   &game->bootstrap.runtime_config_tail.target)) {
+                                   runtime_config_tail.instruction, 0xE8,
+                                   &runtime_config_tail.target)) {
         return FALSE;
     }
 
-    if (!KW_FIND_UNIQUE(module, nt, g_session_tail_pattern, &match)) return FALSE;
-    game->bootstrap.start_session_tail.instruction = match + 13u;
-    return kw_decode_relative_target(module, game->pe_size_of_image,
-                                     game->bootstrap.start_session_tail.instruction, 0xE9,
-                                     &game->bootstrap.start_session_tail.target);
+    if (!KW_FIND_UNIQUE(module, nt, g_kw_session_tail_pattern, &match)) return FALSE;
+    start_session_tail.instruction = match + 13u;
+    if (!kw_decode_relative_target(module, game->pe_size_of_image,
+                                   start_session_tail.instruction, 0xE9,
+                                   &start_session_tail.target)) {
+        return FALSE;
+    }
+
+    game->bootstrap.runtime_config_tail = runtime_config_tail;
+    game->bootstrap.start_session_tail = start_session_tail;
+    game->bootstrap.runtime_config_hook_kind = KW_RUNTIME_CONFIG_HOOK_THISCALL;
+    game->build_name = "Kane's Wrath (signature-resolved)";
+    return TRUE;
+}
+
+static BOOL kw_resolve_tw_bootstrap_sites(
+    kw_u8 *module, IMAGE_NT_HEADERS32 *nt, KwGameLayout *game) {
+    kw_u32 match;
+    KwBranchSite runtime_config_tail;
+    KwBranchSite start_session_tail;
+
+    if (!KW_FIND_UNIQUE(module, nt, g_tw_runtime_tail_pattern, &match)) return FALSE;
+    runtime_config_tail.instruction = match;
+    if (!kw_decode_relative_target(module, game->pe_size_of_image,
+                                   runtime_config_tail.instruction, 0xE8,
+                                   &runtime_config_tail.target)) {
+        return FALSE;
+    }
+
+    if (!KW_FIND_UNIQUE(module, nt, g_tw_session_tail_pattern, &match)) return FALSE;
+    start_session_tail.instruction = match + 13u;
+    if (!kw_decode_relative_target(module, game->pe_size_of_image,
+                                   start_session_tail.instruction, 0xE9,
+                                   &start_session_tail.target)) {
+        return FALSE;
+    }
+
+    game->bootstrap.runtime_config_tail = runtime_config_tail;
+    game->bootstrap.start_session_tail = start_session_tail;
+    game->bootstrap.runtime_config_hook_kind = KW_RUNTIME_CONFIG_HOOK_NOARG;
+    game->build_name = "Tiberium Wars (signature-resolved)";
+    return TRUE;
+}
+
+static BOOL kw_resolve_bootstrap_sites(
+    kw_u8 *module, IMAGE_NT_HEADERS32 *nt, KwGameLayout *game) {
+    KwGameLayout kw_game = *game;
+    KwGameLayout tw_game = *game;
+    BOOL kw_resolved = kw_resolve_kw_bootstrap_sites(module, nt, &kw_game);
+    BOOL tw_resolved = kw_resolve_tw_bootstrap_sites(module, nt, &tw_game);
+
+    if (kw_resolved == tw_resolved) return FALSE;
+    *game = kw_resolved ? kw_game : tw_game;
+    return TRUE;
 }
 
 static BOOL kw_resolve_visual_sites(
@@ -414,7 +481,6 @@ KwGameResolveResult kw_resolve_game_layout(KwGameLayout *out_game, kw_u8 *module
     if (out_game == NULL || !kw_get_nt_headers(module, &nt)) return KW_GAME_INVALID_PE;
     memset(&game, 0, sizeof(game));
     game.module = module;
-    game.build_name = "Kane's Wrath (signature-resolved)";
     game.pe_timestamp = nt->FileHeader.TimeDateStamp;
     game.pe_entry_rva = nt->OptionalHeader.AddressOfEntryPoint;
     game.pe_size_of_image = nt->OptionalHeader.SizeOfImage;

@@ -3,14 +3,15 @@
 ## Compatibility and loader
 
 The signature resolver recognizes the Steam 2012 and EA/Origin-era 2009
-Kane's Wrath 1.02 executables and Kane's Wrath 1.03 (2025). Test each build
-separately; successful signature resolution does not replace gameplay testing.
+Kane's Wrath 1.02 executables, Kane's Wrath 1.03 (2025), and Tiberium Wars
+1.09/1.10. Test each build separately; successful signature resolution does
+not replace gameplay testing.
 
 Begin with the shipped `target_fps=90` configuration and verify:
 
 - The game reaches the main menu and input works.
 - `kw_fps_patch.log` is created beside the DLL.
-- The log contains `bootstrap_status=1`, the runtime-configuration hook, the
+- The log identifies the expected game, contains `bootstrap_status=1`, the runtime-configuration hook, the
   session hook, and the static-patch installation messages.
 - The process exits normally.
 

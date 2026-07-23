@@ -20,6 +20,7 @@ typedef struct KwRuntime {
 } KwRuntime;
 
 typedef int (KW_THISCALL *KwRuntimeConfigTailFn)(void *original_this);
+typedef int (*KwRuntimeConfigNoArgFn)(void);
 typedef int (*KwStartSessionTailFn)(void);
 
 /* One owner for configuration, resolved addresses, and lifecycle state. */
@@ -52,7 +53,7 @@ static BOOL kw_initialize_runtime_files(KwRuntime *runtime) {
 
     ini_found = kw_config_load(&runtime->config, runtime->ini_path);
     kw_log_open(runtime->log_path, runtime->config.logging);
-    kw_log_line("Kane's Wrath FPS patch bootstrap");
+    kw_log_line("C&C 3 FPS patch bootstrap");
     kw_log_text("Resolved target: ");
     kw_log_line(runtime->game.build_name != NULL
                     ? runtime->game.build_name
@@ -158,14 +159,18 @@ static void kw_apply_from_game_hook(KwRuntime *runtime, const char *source) {
 
 static BOOL kw_install_bootstrap_hooks(KwRuntime *runtime) {
     const KwBootstrapLayout *bootstrap = &runtime->game.bootstrap;
+    const void *runtime_hook;
     KwPatchTransaction transaction;
     kw_u8 runtime_patch[5] = {0xE8, 0, 0, 0, 0};
     kw_u8 session_patch[5] = {0xE9, 0, 0, 0, 0};
 
+    runtime_hook = bootstrap->runtime_config_hook_kind == KW_RUNTIME_CONFIG_HOOK_NOARG
+                       ? (const void *)kw_runtime_config_noarg_hook
+                       : (const void *)kw_runtime_config_tail_hook;
     kw_encode_rel32(&runtime_patch[1],
                     kw_game_address(&runtime->game,
                                     bootstrap->runtime_config_tail.instruction + 5u),
-                    kw_runtime_config_tail_hook);
+                    runtime_hook);
     kw_encode_rel32(&session_patch[1],
                     kw_game_address(&runtime->game,
                                     bootstrap->start_session_tail.instruction + 5u),
@@ -217,6 +222,14 @@ int KW_THISCALL kw_runtime_config_tail_hook(void *original_this) {
         &g_runtime.game, g_runtime.game.bootstrap.runtime_config_tail.target);
     int result = original(original_this);
     kw_apply_from_game_hook(&g_runtime, "GameEngine_ApplyRuntimeConfiguration tail");
+    return result;
+}
+
+int kw_runtime_config_noarg_hook(void) {
+    KwRuntimeConfigNoArgFn original = (KwRuntimeConfigNoArgFn)kw_game_address(
+        &g_runtime.game, g_runtime.game.bootstrap.runtime_config_tail.target);
+    int result = original();
+    kw_apply_from_game_hook(&g_runtime, "GameEngine runtime configuration tail (no-arg)");
     return result;
 }
 

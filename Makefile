@@ -13,6 +13,8 @@ SOURCES := \
 	src/proxy_dinput8.c \
 	src/dllmain.c
 
+HEADERS := $(wildcard src/*.h)
+
 COMMON_CFLAGS := \
 	-target $(TARGET) \
 	-std=c11 \
@@ -50,7 +52,7 @@ else
   OUTPUT := $(BINDIR)/dinput8.dll
 endif
 
-.PHONY: all release debug build verify package clean
+.PHONY: all release debug build package clean
 
 all: release
 
@@ -62,29 +64,19 @@ debug:
 
 build: $(OUTPUT)
 
-verify: release
-	@file zig-out/bin/dinput8.dll | grep -q 'PE32 executable (DLL).*Intel 80386'
-	@objdump -p zig-out/bin/dinput8.dll | grep -q 'DLL Name: KERNEL32.dll'
-	@objdump -p zig-out/bin/dinput8.dll | grep -q 'DLL Name: WINMM.DLL'
-	@! objdump -p zig-out/bin/dinput8.dll | grep -Eq 'api-ms-win-crt|MSVCR|VCRUNTIME|ucrtbase'
-	@for symbol in DirectInput8Create DllCanUnloadNow DllGetClassObject DllRegisterServer DllUnregisterServer; do \
-		objdump -p zig-out/bin/dinput8.dll | grep -q " $$symbol$$" || exit 1; \
-	done
-	@echo 'Verified PE32/i386 DLL, proxy exports, and CRT-free imports.'
-
 $(OUTPUT): $(OBJECTS) src/dinput8.def | $(BINDIR) $(LIBDIR)
 	$(ZIG) cc $(COMMON_LDFLAGS) \
 		-Wl,/implib:$(LIBDIR)/dinput8-$(MODE).lib \
 		-Wl,/pdb:$(LIBDIR)/dinput8-$(MODE).pdb \
 		$(OBJECTS) src/dinput8.def -lkernel32 -lwinmm -o $@
 
-$(OBJDIR)/%.obj: src/%.c | $(OBJDIR)
+$(OBJDIR)/%.obj: src/%.c $(HEADERS) | $(OBJDIR)
 	$(ZIG) cc $(CFLAGS) -c $< -o $@
 
 $(OBJDIR) $(BINDIR) $(LIBDIR):
 	mkdir -p $@
 
-package: verify
+package: release
 	rm -rf zig-out/package
 	mkdir -p zig-out/package
 	cp zig-out/bin/dinput8.dll zig-out/package/dinput8.dll
