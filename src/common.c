@@ -44,6 +44,7 @@ int memcmp(const void *left, const void *right, size_t size) {
 
 u32 load_u32(const void *address) {
     u32 value;
+    /* Signatures frequently expose unaligned x86 operands; avoid typed loads. */
     memcpy(&value, address, sizeof(value));
     return value;
 }
@@ -75,6 +76,7 @@ BOOL wide_copy(wchar_t *destination, size_t capacity, const wchar_t *source) {
     }
     while (source[i] != L'\0') {
         if (i + 1 >= capacity) {
+            /* Callers can safely treat failure as an empty path. */
             destination[0] = L'\0';
             return FALSE;
         }
@@ -104,6 +106,7 @@ BOOL wide_append(wchar_t *destination, size_t capacity, const wchar_t *suffix) {
 
 BOOL path_replace_filename(wchar_t *path, size_t capacity, const wchar_t *filename) {
     size_t length = wide_length(path);
+    /* GetModuleFileNameW returns the DLL path; strip only its final component. */
     while (length != 0 && path[length - 1] != L'\\' && path[length - 1] != L'/') {
         --length;
     }

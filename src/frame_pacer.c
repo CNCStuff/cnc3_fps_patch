@@ -9,6 +9,12 @@ static LARGE_INTEGER g_next_deadline;
 static BOOL g_armed;
 static u8 *g_stub;
 
+/*
+ * Replacement for the millisecond Sleep(0) loop in GameEngine_RunMainLoop.
+ * The engine pointer arrives from ESI through the generated stub. The helper
+ * reproduces the stock limiter's telemetry globals because the untouched
+ * history code immediately consumes g_lastEngineFrameDurationMs.
+ */
 static void STDCALL pace_client_frame(void *engine_pointer) {
     const PacingLayout *pacing = &g_game->pacing;
     u8 *engine = (u8 *)engine_pointer;
@@ -29,8 +35,14 @@ static void STDCALL pace_client_frame(void *engine_pointer) {
     DWORD wait_ms;
 
     if (multiplier < 1) multiplier = 1;
+    /* These are the same bounds enforced by the network pacing controller. */
     if (!(scale >= 0.5f)) scale = 0.5f;
     if (scale > 1.0f) scale = 1.0f;
+
+    /*
+     * logic_ms / update_multiplier is one client-frame period. Network scale
+     * below one deliberately lengthens it, matching the original FPU formula.
+     */
     period_ticks_f = ((float)g_qpc_frequency.LowPart * logic_ms) /
                      (1000.0f * (float)multiplier * scale);
     period_ticks = (u32)(period_ticks_f + 0.5f);
@@ -40,14 +52,19 @@ static void STDCALL pace_client_frame(void *engine_pointer) {
 
     QueryPerformanceCounter(&now);
     if (!g_armed) {
+        /* First frame after startup/session reset establishes a fresh epoch. */
         g_next_deadline = now;
         g_armed = TRUE;
     }
+
+    /* Accumulating deadlines avoids adding each frame's oversleep to the next. */
     g_next_deadline.QuadPart += period_ticks;
     if (now.QuadPart > g_next_deadline.QuadPart + (LONGLONG)period_ticks * 4) {
+        /* Do not burst several frames after a breakpoint, load, or long stall. */
         g_next_deadline = now;
     }
 
+    /* Sleep while far away, yield near the deadline, then finish with a spin. */
     for (;;) {
         LONGLONG remaining;
         QueryPerformanceCounter(&now);
@@ -62,6 +79,7 @@ static void STDCALL pace_client_frame(void *engine_pointer) {
 
     after_ms = timeGetTime();
     wait_ms = after_ms - before_ms;
+    /* Preserve the stock split between work time and limiter wait time. */
     *(volatile DWORD *)game_address(g_game, pacing->last_frame_duration_ms) = work_ms;
     *(volatile DWORD *)game_address(g_game, pacing->last_wait_ms) = wait_ms;
     *(volatile DWORD *)game_address(g_game, pacing->total_wait_ms) += wait_ms;
@@ -74,7 +92,18 @@ static BOOL build_stub(void) {
     if (g_stub != NULL) return TRUE;
     if (!allocate_executable_stub(32, &stub)) return FALSE;
 
-    /* Preserve both branches of the game's outer limiter gate. */
+    /*
+     * Replacement for the nine bytes at the outer limiter gate:
+     *
+     *   cmp [enforce],0; je no_limit
+     *   push esi                 ; GameEngine *
+     *   call pace_client_frame   ; __stdcall removes the argument
+     *   jmp history_path
+     * no_limit:
+     *   jmp no_limit_path
+     *
+     * Both destinations rejoin untouched GameEngine_RunMainLoop code.
+     */
     stub[0] = 0x80;
     stub[1] = 0x3D;
     encode_u32(&stub[2],
@@ -103,6 +132,7 @@ BOOL frame_pacer_initialize(
     g_game = game;
     g_config = config;
     if (!enabled) return TRUE;
+    /* pace_client_frame uses 32-bit tick arithmetic on this x86 target. */
     if (!QueryPerformanceFrequency(&g_qpc_frequency) ||
         g_qpc_frequency.HighPart != 0 || g_qpc_frequency.LowPart == 0) {
         return FALSE;

@@ -39,40 +39,41 @@ Compare the same short skirmish against an unpatched 30 FPS run:
 - Pause/unpause, camera movement, zoom, camera shake, Alt-Tab, loading screens,
   saved games, and a second match in the same process must remain stable.
 
-The log should report a W3D step of 22 ms at 45 FPS and 11 ms at 90 FPS.
+The initial W3D step should be 22, 16, 13, or 11 ms at 45, 60, 75, or
+90 FPS respectively. At 60 and 75 FPS the live value alternates as described
+in the implementation notes.
 
 ## Frame pacing
 
 Capture several minutes with `precise_pacing=1`, then repeat with
 `precise_pacing=0`.
 
-The QPC pacer should average close to 45.000 or 90.000 Hz. The integer fallback
-tends toward approximately 45.45 or 90.91 Hz before workload and scheduler
-effects.
+The QPC pacer should average close to the configured 45, 60, 75, or 90 Hz.
+The integer fallback uses 22, 16, 13, or 11 ms periods and therefore does not
+hit every target exactly.
 
 If the spin tail consumes too much CPU, lower `spin_threshold_us`. If the final
 deadline jitters, raise it modestly; values above 1000 microseconds need clear
 frame-time evidence.
 
-## 45 FPS alternative
+## Alternate rates
 
-After validating the default 90 FPS mode, set `target_fps=45`, restart the
-process, and repeat the gameplay checks. The log should report a 22 ms W3D
-step, while visual state continues at stock real-time speed.
+After validating the default 90 FPS mode, repeat the checks at 45, 60, and
+75 FPS. Verify that one real-time minute advances the same amount of gameplay
+and W3D animation at every rate.
 
 ## Replay and multiplayer determinism
 
 Do not assume online safety from static analysis alone. Validate:
 
-1. The same deterministic replay at 30, 45, and 90 FPS.
+1. The same deterministic replay at 30, 45, 60, 75, and 90 FPS.
 2. Final state and available logic CRC/desync telemetry.
 3. Same-rate LAN or online clients.
-4. Mixed 30/45 and 30/90 clients.
+4. Mixed-rate clients.
 5. A deliberately slow peer so network pacing below `1.0` is exercised.
 
 Any CRC mismatch must be investigated with the reviewed patch set intact. Do
-not bypass the network gate, change the six-phase scheduler, or overwrite the
-shared `1/30` value.
+not bypass the network gate or overwrite the shared `1/30` value.
 
 ## Failure isolation
 
@@ -80,7 +81,7 @@ shared `1/30` value.
   DLL placement.
 - Broken input: run with `enabled=0` to separate DirectInput forwarding from
   FPS patch installation.
-- Fast visual effects: verify the 22/11 ms W3D step and the log message
+- Fast visual effects: verify the W3D step sequence and the log message
   `Frame-counted particles, tracers, clouds and Anim2D pinned to retail 30 Hz`.
 - Uneven pacing at correct speed: compare precise pacing on and off, then tune
   only `spin_threshold_us`.

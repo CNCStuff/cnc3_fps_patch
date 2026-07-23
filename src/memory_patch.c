@@ -7,6 +7,7 @@ BOOL write_protected(void *destination, const void *source, size_t size) {
         return FALSE;
     }
     memcpy(destination, source, size);
+    /* Patched code can already be present in another core's instruction cache. */
     FlushInstructionCache(GetCurrentProcess(), destination, size);
     VirtualProtect(destination, size, old_protection, &ignored);
     return TRUE;
@@ -30,6 +31,7 @@ BOOL finalize_executable_stub(u8 *stub, size_t size) {
     if (!VirtualProtect(stub, size, PAGE_EXECUTE_READ, &old_protection)) {
         return FALSE;
     }
+    /* Stubs are assembled while writable, then made W^X before publication. */
     return FlushInstructionCache(GetCurrentProcess(), stub, size);
 }
 
@@ -41,6 +43,7 @@ void encode_u32(u8 *destination, u32 value) {
 }
 
 void encode_rel32(u8 *operand, const u8 *next_instruction, const void *target) {
+    /* x86 CALL/JMP displacement is relative to the end of the instruction. */
     intptr_t displacement = (const u8 *)target - next_instruction;
     encode_u32(operand, (u32)(i32)displacement);
 }
@@ -61,6 +64,7 @@ BOOL patch_transaction_write(PatchTransaction *transaction,
     record->size = size;
     memcpy(record->original, destination, size);
     if (!write_protected(destination, replacement, size)) return FALSE;
+    /* Failed writes are not recorded; earlier completed writes remain rollbackable. */
     ++transaction->count;
     return TRUE;
 }
@@ -68,6 +72,7 @@ BOOL patch_transaction_write(PatchTransaction *transaction,
 void patch_transaction_rollback(PatchTransaction *transaction) {
     if (transaction == NULL) return;
     while (transaction->count != 0) {
+        /* Reverse order also handles future overlapping/nested patch ranges safely. */
         PatchRecord *record = &transaction->records[--transaction->count];
         write_protected(record->destination, record->original, record->size);
     }

@@ -6,9 +6,11 @@ static BOOL g_log_enabled;
 static void write_raw(const char *data, size_t size) {
     DWORD written;
     if (!g_log_enabled || g_log_file == INVALID_HANDLE_VALUE || data == NULL || size == 0) return;
+    /* Logging is diagnostic-only; a failed write must never disable the patch. */
     WriteFile(g_log_file, data, (DWORD)size, &written, NULL);
 }
 
+/* Decimal formatting is local because the DLL deliberately has no CRT. */
 static size_t format_u32(char *buffer, size_t capacity, u32 value) {
     char reverse[16];
     size_t count = 0;
@@ -26,6 +28,7 @@ static size_t format_u32(char *buffer, size_t capacity, u32 value) {
 BOOL log_open(const wchar_t *path, BOOL enabled) {
     g_log_enabled = enabled;
     if (!enabled) return TRUE;
+    /* FILE_SHARE_READ allows inspecting the bootstrap log while the game runs. */
     g_log_file = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS,
                              FILE_ATTRIBUTE_NORMAL, NULL);
     return g_log_file != INVALID_HANDLE_VALUE;

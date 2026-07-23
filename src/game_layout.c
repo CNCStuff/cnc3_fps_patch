@@ -21,6 +21,7 @@ static const u16 g_kw_session_tail_pattern[] = {
     0xE9, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
     0x53, 0x55, 0x56, 0x57, 0x8B, 0x7C, 0x24, 0x14
 };
+/* TW's late runtime call has a different ABI, so it has a separate signature. */
 static const u16 g_tw_runtime_config_pattern[] = {
     0xE8, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
     0x8B, 0x0D, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
@@ -37,6 +38,8 @@ static const u16 g_tw_session_tail_pattern[] = {
     0xE9, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
     0x55, 0x56, 0x57, 0x8B, 0x7C, 0x24, 0x10
 };
+
+/* Continuous visual integration sites that incorrectly share retail 1/30. */
 static const u16 g_camera_pattern[] = {
     0x80, 0xBB, 0xC8, 0x00, 0x00, 0x00, 0x00, 0x75, 0x6F,
     0xD9, 0x05, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, 0x51
@@ -52,6 +55,8 @@ static const u16 g_model_pattern[] = {
     0xF3, 0x0F, 0x58, 0x05,
     PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY
 };
+
+/* Absolute client-frame consumers whose authored data remains in 30 Hz units. */
 static const u16 g_tracer_reset_pattern[] = {
     0x8B, 0x01, 0xFF, 0x50, 0x78, 0x89, 0x86, 0x90, 0x00, 0x00, 0x00, 0x5E, 0xC3
 };
@@ -70,6 +75,8 @@ static const u16 g_anim2d_update_pattern[] = {
     0x8B, 0x0D, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
     0x8B, 0x01, 0xFF, 0x50, 0x78, 0x2B, 0x46, 0x08, 0x3B, 0x46, 0x18
 };
+
+/* Particle/cursor sites use a mix of client-frame and millisecond timebases. */
 static const u16 g_particle_pattern[] = {
     0x8B, 0xF1, 0xE8, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
     0x83, 0x66, 0x40, 0x00, 0x6A, 0x02, 0x8D, 0xBE, 0x8C, 0x00, 0x00, 0x00,
@@ -87,6 +94,8 @@ static const u16 g_radius_cursor_throb_pattern[] = {
     PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
     0x51, 0xDD, 0x1C, 0x24
 };
+
+/* Independent presentation limiter and GameEngine pacing/history control flow. */
 static const u16 g_display_pattern[] = {
     0x83, 0xF9, 0x1D, 0x7D, 0x13, 0xE8
 };
@@ -104,6 +113,50 @@ static const u16 g_history_pattern[] = {
     0x83, 0xBE, 0x60, 0x01, 0x00, 0x00, 0x40,
     0x7C, 0x07, 0x83, 0xA6, 0x60, 0x01, 0x00, 0x00, 0x00
 };
+
+/*
+ * Confirmed KW virtual addresses. Absolute and relative operands are the only
+ * wildcarded bytes in the signatures below.
+ *
+ *                              phase batch  interpolation  slice flush  W3D special  W3D normal
+ * KW 1.02 EA/Origin 2009       0x00583DE7   0x0057149A     0x0051C892   0x007A4F53   0x007A4F8E
+ * KW 1.02 Steam 2012           0x006560A6   0x0064333E     0x005EF10F   0x004A5A7C   0x004A5AB7
+ * KW 1.03                      0x005C3C61   0x005B0F6D     0x0055C5A6   0x007F0F31   0x007F0F6C
+ */
+static const u16 g_phase_batch_pattern[] = {
+    0x8D, 0x47, 0xFF, 0x0F, 0xAF, 0xC1, 0x99, 0x6A, 0x06, 0x5E, 0xF7,
+    0xFE, 0x40, 0x6B, 0xC0, 0x06, 0x99, 0xF7, 0xF9, 0x8B, 0xF0, 0x46
+};
+static const u16 g_phase_interpolation_pattern[] = {
+    0xF3, 0x0F, 0x2A, 0x41, 0x40, 0xF3, 0x0F, 0x59, 0x05,
+    PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x0F, 0x57, 0xC9, 0x0F, 0x2F, 0xC8, 0xF3, 0x0F, 0x11, 0x41, 0x48,
+    0x77, 0x0D, 0xF3, 0x0F, 0x10, 0x0D,
+    PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x0F, 0x2F, 0xC1, 0x76, 0x03, 0x0F, 0x28, 0xC1,
+    0xF3, 0x0F, 0x11, 0x41, 0x48, 0xC3
+};
+static const u16 g_client_slice_flush_pattern[] = {
+    0xA1, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x33, 0xD2, 0xF7, 0x35,
+    PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x6A, 0x06, 0x8B, 0xC8, 0x58, 0x99, 0xF7, 0xF9, 0x5F, 0x8B, 0xC8,
+    0x8B, 0x45, 0x08, 0x99, 0xF7, 0xF9, 0x85, 0xD2, 0x75, 0x05,
+    0xE8, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY
+};
+static const u16 g_w3d_special_advance_pattern[] = {
+    0xA1, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x03, 0x05, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x50, 0xA3, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY
+};
+static const u16 g_w3d_normal_advance_pattern[] = {
+    0xA1, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x0F, 0xAF, 0xC6, 0x01, 0x05,
+    PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0xFF, 0x35, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY
+};
+
+/* CRT initializers prove the identities and units of timing-cache globals. */
 static const u16 g_w3d_initializer_pattern[] = {
     0xB8, 0xE8, 0x03, 0x00, 0x00, 0x33, 0xD2, 0xF7, 0x35,
     PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
@@ -149,6 +202,7 @@ static BOOL get_nt_headers(u8 *module, IMAGE_NT_HEADERS32 **out_nt) {
     IMAGE_NT_HEADERS32 *nt;
     if (module == NULL || out_nt == NULL) return FALSE;
     dos = (IMAGE_DOS_HEADER *)module;
+    /* Bound e_lfanew before following a pointer supplied by an unknown image. */
     if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0 || dos->e_lfanew > 0x100000) {
         return FALSE;
     }
@@ -179,6 +233,12 @@ static BOOL find_unique_signature_filtered(
     u32 found = 0;
     size_t matches = 0;
     u16 section_index;
+
+    /*
+     * Scan executable virtual ranges, where relocation has already fixed
+     * absolute operands. Requiring exactly one match makes every signature a
+     * semantic assertion rather than a best-effort version lookup.
+     */
     for (section_index = 0; section_index < nt->FileHeader.NumberOfSections;
          ++section_index, ++section) {
         u32 start;
@@ -224,6 +284,7 @@ static BOOL absolute_operand_to_rva(u8 *module, u32 image_size,
                                     u32 absolute, u32 *out_rva) {
     uintptr_t base = (uintptr_t)module;
     uintptr_t address = (uintptr_t)absolute;
+    /* Reject imports, heap pointers, and any operand outside the main image. */
     if (address < base || address - base >= image_size) return FALSE;
     *out_rva = (u32)(address - base);
     return TRUE;
@@ -241,6 +302,7 @@ static BOOL decode_relative_target(u8 *module, u32 image_size,
                                    u32 *out_target_rva) {
     i32 displacement;
     i32 target;
+    /* BranchSite targets are stored as RVAs so ASLR never leaks past resolution. */
     if (instruction_rva > image_size - 5u || module[instruction_rva] != opcode) return FALSE;
     memcpy(&displacement, module + instruction_rva + 1u, sizeof(displacement));
     target = (i32)(instruction_rva + 5u) + displacement;
@@ -317,6 +379,7 @@ static BOOL resolve_bootstrap_sites(
     BOOL kw_resolved = resolve_kw_bootstrap_sites(module, nt, &kw_game);
     BOOL tw_resolved = resolve_tw_bootstrap_sites(module, nt, &tw_game);
 
+    /* Exactly one ABI-specific bootstrap must match; ambiguity is unsafe. */
     if (kw_resolved == tw_resolved) return FALSE;
     *game = kw_resolved ? kw_game : tw_game;
     return TRUE;
@@ -362,6 +425,7 @@ static BOOL resolve_visual_sites(
         game->timing.client_fps < 4u) {
         return FALSE;
     }
+    /* The two authoritative integer rates are adjacent: logic FPS then client FPS. */
     game->timing.logic_fps = game->timing.client_fps - 4u;
 
     if (!FIND_UNIQUE(module, nt, g_radius_cursor_throb_pattern, &match)) return FALSE;
@@ -375,6 +439,7 @@ static BOOL resolve_visual_sites(
         return FALSE;
     }
 
+    /* Camera, laser, and model must all name the same relocated retail scalar. */
     retail_step_address = (u32)(uintptr_t)(module + visual->retail_step);
     return load_u32(module + visual->laser_step_operand) == retail_step_address &&
            load_u32(module + visual->model_step_operand) == retail_step_address;
@@ -401,11 +466,13 @@ static BOOL resolve_pacing_sites(
     }
 
     if (!FIND_UNIQUE(module, nt, g_history_pattern, &pacing->history_path)) return FALSE;
+    /* Decode the original gate's short JE destination, which the stub preserves. */
     no_limit_path = (i32)(pacing->outer_gate + 9u) +
                     (int8_t)module[pacing->outer_gate + 8u];
     if (no_limit_path < 0 || (u32)no_limit_path >= game->pe_size_of_image) return FALSE;
     pacing->no_limit_path = (u32)no_limit_path;
 
+    /* The display wait reads GlobalData; prove it is the same resolved cluster. */
     if (!read_absolute_rva(module, game->pe_size_of_image,
                            pacing->display_limiter_branch + 11u,
                            &game->timing.global_data_pointer) ||
@@ -414,6 +481,11 @@ static BOOL resolve_pacing_sites(
         return FALSE;
     }
 
+    /*
+     * These globals form one fixed compiler-laid-out cluster in supported
+     * builds. Derive them from the signature-proven flag instead of adding
+     * several weak signatures for otherwise anonymous DWORDs.
+     */
     game->timing.game_engine_pointer = pacing->enforce_limit_flag + 0x27u;
     pacing->total_wait_ms = pacing->enforce_limit_flag + 0x13u;
     pacing->last_wait_ms = pacing->enforce_limit_flag + 0x17u;
@@ -428,6 +500,7 @@ static BOOL resolve_cached_timing_values(
     u32 initializer;
     u32 source_address = (u32)(uintptr_t)(module + timing->client_fps);
 
+    /* Follow startup initializers from authoritative g_clientUpdateFPS. */
     if (!FIND_UNIQUE(module, nt, g_w3d_initializer_pattern, &initializer) ||
         load_u32(module + initializer + 9u) != source_address ||
         !read_absolute_rva(module, game->pe_size_of_image, initializer + 14u,
@@ -474,6 +547,73 @@ static BOOL resolve_cached_timing_values(
                              &timing->visual_seconds_per_frame);
 }
 
+static BOOL resolve_scheduler_sites(
+    u8 *module, IMAGE_NT_HEADERS32 *nt, GameLayout *game) {
+    SchedulerLayout *scheduler = &game->scheduler;
+    u32 match;
+    u32 client_fps_address = (u32)(uintptr_t)(module + game->timing.client_fps);
+    u32 logic_fps_address = (u32)(uintptr_t)(module + game->timing.logic_fps);
+
+    if (!FIND_UNIQUE(module, nt, g_phase_batch_pattern,
+                     &scheduler->phase_batch_block) ||
+        !FIND_UNIQUE(module, nt, g_phase_interpolation_pattern,
+                     &scheduler->phase_interpolation_function) ||
+        !FIND_UNIQUE(module, nt, g_client_slice_flush_pattern, &match) ||
+        load_u32(module + match + 1u) != client_fps_address ||
+        load_u32(module + match + 9u) != logic_fps_address) {
+        return FALSE;
+    }
+
+    /*
+     * GameLogic_UpdatePhase block layout (KW 1.02 Steam VA 0x005EF10F):
+     * +1  = &g_clientUpdateFPS, +9 = &g_logicFPS, +34 = CALL sub_6DE5B1.
+     * Proving both operands prevents an unrelated pair of integer divisions
+     * from being accepted as the phase-end flush.
+     */
+    scheduler->client_slice_flush.instruction = match + 34u;
+    return decode_relative_target(
+        module, game->pe_size_of_image,
+        scheduler->client_slice_flush.instruction, 0xE8,
+        &scheduler->client_slice_flush.target);
+}
+
+static BOOL resolve_w3d_clock_sites(
+    u8 *module, IMAGE_NT_HEADERS32 *nt, GameLayout *game) {
+    W3DClockLayout *clock = &game->w3d_clock;
+    TimingLayout *timing = &game->timing;
+    u32 special;
+    u32 normal;
+    u32 accumulated;
+    u32 expected_step = (u32)(uintptr_t)(module + timing->w3d_milliseconds_per_frame);
+    u32 expected_accumulated;
+
+    if (!FIND_UNIQUE(module, nt, g_w3d_special_advance_pattern, &special) ||
+        !FIND_UNIQUE(module, nt, g_w3d_normal_advance_pattern, &normal) ||
+        !read_absolute_rva(module, game->pe_size_of_image, special + 1u,
+                           &accumulated)) {
+        return FALSE;
+    }
+
+    /*
+     * Special block: MOV EAX,[accum]; ADD EAX,[step]; PUSH EAX; MOV [accum],EAX.
+     * Normal block:  MOV EAX,[step]; IMUL EAX,ESI; ADD [accum],EAX; PUSH [accum].
+     * ESI is the client-frame delta in W3DDisplay_RenderAndPresentFrame.
+     */
+    expected_accumulated = (u32)(uintptr_t)(module + accumulated);
+    if (load_u32(module + special + 7u) != expected_step ||
+        load_u32(module + special + 13u) != expected_accumulated ||
+        load_u32(module + normal + 1u) != expected_step ||
+        load_u32(module + normal + 10u) != expected_accumulated ||
+        load_u32(module + normal + 16u) != expected_accumulated) {
+        return FALSE;
+    }
+
+    clock->special_advance_block = special;
+    clock->normal_advance_block = normal;
+    timing->w3d_accumulated_time_ms = accumulated;
+    return TRUE;
+}
+
 GameResolveResult resolve_game_layout(GameLayout *out_game, u8 *module) {
     IMAGE_NT_HEADERS32 *nt;
     GameLayout game;
@@ -485,10 +625,17 @@ GameResolveResult resolve_game_layout(GameLayout *out_game, u8 *module) {
     game.pe_entry_rva = nt->OptionalHeader.AddressOfEntryPoint;
     game.pe_size_of_image = nt->OptionalHeader.SizeOfImage;
 
+    /*
+     * Resolver order is intentional: later subsystems validate operands
+     * against globals found by earlier ones. Timestamp and entry point are
+     * diagnostic only; instruction semantics decide compatibility.
+     */
     if (!resolve_bootstrap_sites(module, nt, &game) ||
         !resolve_visual_sites(module, nt, &game) ||
         !resolve_pacing_sites(module, nt, &game) ||
         !resolve_cached_timing_values(module, nt, &game) ||
+        !resolve_scheduler_sites(module, nt, &game) ||
+        !resolve_w3d_clock_sites(module, nt, &game) ||
         load_u32(module + game.timing.logic_fps) != 15u ||
         load_u32(module + game.timing.client_fps) != 30u ||
         module[game.pacing.display_limiter_branch] != 0x7D ||

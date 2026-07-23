@@ -7,6 +7,7 @@
 
 BOOL game_patches_install(const GameLayout *game, const Config *config,
                           u8 *pacing_stub);
+/* Reset only per-session fractional state; installed code remains process-wide. */
 void game_patches_reset_state(void);
 
 #endif

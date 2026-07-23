@@ -74,6 +74,50 @@ Each instruction operand is checked against the relocated retail address at
 the point it is replaced. All three writes share one transaction, so a later
 mismatch or write failure restores the earlier operands.
 
+## Six-phase logic scheduler
+
+The authoritative 15 Hz logic tick is split into six ordered phases. The
+stock batching formula works when `clientFPS / 15` divides six, which covers
+45 and 90 FPS but makes unmodified 60 and 75 FPS run slowly.
+
+The following examples are from Kane's Wrath 1.02 Steam 2012:
+
+```text
+RVA 0x002560A6  GameEngine_DispatchLogicPhase batching arithmetic
+RVA 0x0024333E  GameEngine_UpdatePhaseInterpolation
+RVA 0x001EF10F  GameLogic_UpdatePhase client-slice Drawable flush
+```
+
+For ratio `R = targetFPS / 15` and the first pending phase `P`, the replacement
+dispatcher calculates:
+
+```c
+client_slot = (R * P + 5) / 6;
+end_phase = (6 * client_slot) / R;
+```
+
+This produces:
+
+```text
+45 FPS: 1-2, 3-4, 5-6
+60 FPS: 1, 2-3, 4, 5-6
+75 FPS: 1, 2, 3, 4, 5-6
+90 FPS: 1, 2, 3, 4, 5, 6
+```
+
+Interpolation uses `client_slot / R` at 60 and 75 FPS, giving evenly spaced
+quarter- or fifth-tick samples. The 45/90 paths retain their stock
+`phase / 6` calculation.
+
+The third hook preserves the stock call which drains pending Object updates
+into Drawable state, but invokes it only after the final phase assigned to the
+current client frame. The stock modulo condition would invoke it after every
+phase at ratios four and five, including twice inside the final batched frame.
+
+`GameEngine_IsClientFrameBoundary` does not require a patch. With the schedules
+above, its existing `phase == 6 / R` test still identifies the first client
+slice of each logic tick.
+
 ## Frame-counted FX compatibility
 
 The central W3D clock correction does not cover systems whose asset data is
@@ -94,7 +138,7 @@ RVA 0x0009D5D0  tracer-manager update frame read
 ```
 
 The helper returns `ceil(clientFrame * 30 / targetFPS)`. Repeated synthetic
-frames make the existing manager naturally skip extra 45/90 Hz updates while
+frames make the existing manager naturally skip extra high-rate updates while
 preserving its original emission and lifetime arithmetic.
 
 The general FX particle engine is also frame-integrated. CPU particle life is
@@ -111,7 +155,7 @@ RVA 0x0009F9AC
 The wrapper uses a 30/target fixed-point accumulator, producing exactly 30
 particle-simulation calls per nominal second. It deliberately hooks the base
 simulation call inside `W3DParticleSystemManager`, not the outer manager call.
-W3D render-buffer preparation therefore still runs on every 45/90 Hz client
+W3D render-buffer preparation therefore still runs on every client
 frame.
 
 GPU particles have a second timebase consistency issue. Particle creation
@@ -121,8 +165,8 @@ expiration directly multiplies W3D milliseconds by the live
 DLL-owned constant 30, so creation and expiration use the same visual frame.
 
 These fixes intentionally retain 30 Hz state advancement for legacy
-frame-counted tracers and particles. Their W3D rendering can still occur at
-45/90 Hz, but CPU particle positions may repeat between simulation updates;
+frame-counted tracers and particles. Their W3D rendering still occurs at the
+configured rate, but CPU particle positions may repeat between simulation updates;
 making every legacy particle module smoothly variable-step would require a
 larger per-module rewrite.
 
@@ -160,8 +204,8 @@ shared retail constant `0.03 frames/ms`. At 90 FPS that makes a 1000 ms period
 only 30 frames, so it completes in roughly 333 ms.
 
 The multiplication operand at Steam 2012 RVA `0x00150F7B` is redirected to a
-DLL-owned `targetFPS / 1000` float. Thus 1000 ms becomes 45 frames at 45 FPS or
-90 frames at 90 FPS. The original shared `0.03` scalar is not changed because
+DLL-owned `targetFPS / 1000` float. Thus a 1000 ms period becomes exactly one
+second at every supported rate. The original shared `0.03` scalar is not changed because
 GPU particle creation intentionally uses a fixed 30-frame visual time domain.
 
 The remainder of the same radius-decal update already uses
@@ -180,8 +224,14 @@ The destination that updates `g_previousPresentTimeMs` remains in the path.
 
 ## Live state initialization
 
-For 45 Hz, the ratio is 3 and the W3D step is 22 ms. For 90 Hz, the ratio is 6
-and the W3D step is 11 ms.
+The supported targets and client-to-logic ratios are:
+
+```text
+45 FPS -> ratio 3
+60 FPS -> ratio 4
+75 FPS -> ratio 5
+90 FPS -> ratio 6
+```
 
 The wrapper updates:
 
@@ -232,6 +282,35 @@ time domain, and only the inconsistent expiry operand is redirected.
 
 The authoritative `g_logicFPS` is validated as 15 and never written.
 
+### Retail-equivalent W3D time
+
+Retail advances its central W3D clock by an integer 33 ms on each of 30 client
+frames, or 990 W3D milliseconds per nominal second. Constant integer steps
+preserve that rate at 45 and 90 FPS, but not at 60 or 75 FPS.
+
+Two sequences in `W3DDisplay_RenderAndPresentFrame` are redirected to one
+remainder-based helper:
+
+```text
+RVA 0x000A5A7C  reduced-render/special-path advance
+RVA 0x000A5AB7  normal client-frame-delta advance
+```
+
+The helper accumulates `clientFrameDelta * 990`, divides by `targetFPS`, and
+retains the integer remainder. Its per-frame steps are:
+
+```text
+45 FPS: 22
+60 FPS: 16, 17
+75 FPS: 13, 13, 13, 13, 14
+90 FPS: 11
+```
+
+It also publishes the next step through the game's live W3D
+milliseconds-per-client-frame field. Camera and other W3DView functions which
+read that field therefore follow the same long-term 990 ms rate instead of
+remaining at a truncated constant 16 or 13 ms.
+
 ## QPC pacing hook
 
 When `precise_pacing=1`, the nine-byte stock limiter gate at RVA `0x00256449`
@@ -261,9 +340,9 @@ The deadline is re-anchored after a long pause or skipped-limiter interval. A
 short configurable spin tail avoids throwing away sub-millisecond precision;
 the coarse portion of the wait uses `Sleep(1)`, `SwitchToThread`, or `Sleep(0)`.
 
-Setting `precise_pacing=0` leaves the stock outer limiter in place. Its 22/11
-ms integer periods are slightly above the requested rate, but it provides a
-direct fallback when isolating QPC pacing behavior.
+Setting `precise_pacing=0` leaves the stock outer limiter in place. Its rounded
+22/16/13/11 ms periods do not hit every requested rate exactly, but it remains
+useful when isolating QPC pacing behavior.
 
 ## Patch safety
 

@@ -4,7 +4,7 @@
 
 This project is a DLL-based patch that changes multiple functions and constants
 in the Tiberium Wars or Kane's Wrath binary at runtime to make it possible to
-render the game at **45 or 90 FPS** compared to the default **30 FPS**.
+render the game at **45, 60, 75, or 90 FPS** compared to the default **30 FPS**.
 The actual simulation clock still ticks at the default 15Hz.
 
 The patch is loaded through a DLL named `dinput8.dll` so the game loads it
@@ -27,7 +27,7 @@ Reverse engineering of the game binary, the implementation and documentation wer
 ## Configuration
 
 The release ZIP includes `fps_patch.ini` with the default 90 FPS and some other settings configured (including logging).
-You can open it in any text editor and modify it however you want. For example, to use 45 FPS instead of the default 90 FPS, change `target_fps`:
+You can open it in any text editor and select 45, 60, 75, or 90 FPS. For example:
 
 ```ini
 target_fps=45

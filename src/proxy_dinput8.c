@@ -7,6 +7,7 @@ typedef HRESULT(WINAPI *DllGetClassObjectFn)(REFCLSID, REFIID, LPVOID *);
 typedef HRESULT(WINAPI *DllRegisterServerFn)(void);
 
 static HMODULE g_real_dinput8;
+/* 0 = not attempted, 1 = one thread loading, 2 = ready, -1 = last attempt failed. */
 static volatile LONG g_proxy_load_state;
 static DirectInput8CreateFn g_real_direct_input_8_create;
 static DllCanUnloadNowFn g_real_dll_can_unload_now;
@@ -19,9 +20,12 @@ static BOOL load_real_dinput8(void) {
     LONG state = InterlockedCompareExchange(&g_proxy_load_state, 1, 0);
     if (state == 2) return TRUE;
     if (state == 1) {
+        /* Export calls are rare; yielding avoids adding another synchronization object. */
         while (InterlockedCompareExchange(&g_proxy_load_state, 1, 1) == 1) Sleep(0);
         return g_proxy_load_state == 2;
     }
+
+    /* An absolute System32 path prevents the proxy from recursively loading itself. */
     if (GetSystemDirectoryW(path, ARRAY_COUNT(path)) == 0 ||
         !wide_append(path, ARRAY_COUNT(path), L"\\dinput8.dll")) {
         InterlockedExchange(&g_proxy_load_state, -1);
@@ -52,6 +56,7 @@ static BOOL load_real_dinput8(void) {
 
 HRESULT WINAPI DirectInput8Create(
     HINSTANCE instance, DWORD version, REFIID interface_id, LPVOID *output, LPUNKNOWN outer) {
+    /* First normal game call after process startup: safe place for INI/log setup. */
     runtime_proxy_checkpoint();
     if (!load_real_dinput8()) return E_FAIL;
     return g_real_direct_input_8_create(instance, version, interface_id, output, outer);

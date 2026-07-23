@@ -27,6 +27,7 @@ typedef uint32_t u32;
 typedef uint64_t u64;
 typedef int32_t i32;
 
+/* The DLL is linked with -nostdlib; keep the tiny required CRT surface local. */
 void *memcpy(void *destination, const void *source, size_t size);
 void *memmove(void *destination, const void *source, size_t size);
 void *memset(void *destination, int value, size_t size);
@@ -37,6 +38,7 @@ size_t ascii_length(const char *text);
 size_t wide_length(const wchar_t *text);
 BOOL wide_copy(wchar_t *destination, size_t capacity, const wchar_t *source);
 BOOL wide_append(wchar_t *destination, size_t capacity, const wchar_t *suffix);
+/* Retains the directory portion, including its final separator. */
 BOOL path_replace_filename(wchar_t *path, size_t capacity, const wchar_t *filename);
 
 #endif
