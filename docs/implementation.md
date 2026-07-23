@@ -36,12 +36,12 @@ sites from masked instruction signatures at startup.
 RVA 0x0025368E
   original: E8 87 BA 12 00
   role: final call in GameEngine_ApplyRuntimeConfiguration
-  patch: CALL kw_runtime_config_tail_hook
+  patch: CALL runtime_config_thiscall_hook
 
 RVA 0x00255F95
   original: E9 86 2E FF FF
   role: tail jump from GameEngine_StartGameSession
-  patch: JMP kw_start_session_tail_hook
+  patch: JMP start_session_tail_hook
 ```
 
 This avoids relocating arbitrary function prologues. Kane's Wrath wraps the
@@ -105,7 +105,7 @@ storage follow the same convention. The DLL redirects this direct call:
 ```text
 RVA 0x0009F9AC
   original: CALL FXParticleSystem_ParticleSystemManager_UpdateForClientFrame
-  patch:    CALL kw_fx_particle_simulation_update_at_retail_rate
+  patch:    CALL update_particles_at_retail_rate
 ```
 
 The wrapper uses a 30/target fixed-point accumulator, producing exactly 30
@@ -245,7 +245,7 @@ cmp byte ptr [g_enforceFPSLimitThisFrame], 0
 je  no_limit
 
 push esi                    ; GameEngine *
-call kw_pace_client_frame   ; __stdcall
+call pace_client_frame      ; __stdcall
 jmp pacing_history_update
 
 no_limit:

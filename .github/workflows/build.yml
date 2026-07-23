@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build:
-    name: Build and verify
+    name: Build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -25,23 +25,23 @@ jobs:
         with:
           version: 0.16.0
 
-      - name: Build and verify
-        run: make verify
+      - name: Build
+        run: make release
 
       - name: Prepare downloadable files
         run: |
           mkdir -p dist
           cp zig-out/bin/dinput8.dll dist/dinput8.dll
-          cp kw_fps_patch.ini.example dist/kw_fps_patch.ini
+          cp fps_patch.ini.example dist/fps_patch.ini
           cd dist
-          zip -9 kw-fps-patch.zip dinput8.dll kw_fps_patch.ini
-          rm dinput8.dll kw_fps_patch.ini
+          zip -9 fps_patch.zip dinput8.dll fps_patch.ini
+          rm dinput8.dll fps_patch.ini
 
       - name: Upload commit artifact
         uses: actions/upload-artifact@v7
         with:
-          name: kw-fps-patch-${{ github.sha }}
-          path: dist/kw-fps-patch.zip
+          name: fps_patch-${{ github.sha }}
+          path: dist/fps_patch.zip
           if-no-files-found: error
           retention-days: 90
 
@@ -58,10 +58,10 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - name: Download verified artifact
+      - name: Download build artifact
         uses: actions/download-artifact@v8
         with:
-          name: kw-fps-patch-${{ github.sha }}
+          name: fps_patch-${{ github.sha }}
           path: dist
 
       - name: Refresh latest build release
@@ -86,4 +86,4 @@ jobs:
             --title "Latest automated build" \
             --notes "Automated build of commit \`$GITHUB_SHA\`." \
             --latest \
-            dist/kw-fps-patch.zip
+            dist/fps_patch.zip

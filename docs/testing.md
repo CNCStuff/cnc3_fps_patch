@@ -10,7 +10,7 @@ not replace gameplay testing.
 Begin with the shipped `target_fps=90` configuration and verify:
 
 - The game reaches the main menu and input works.
-- `kw_fps_patch.log` is created beside the DLL.
+- `fps_patch.log` is created beside the DLL.
 - The log identifies the expected game, contains `bootstrap_status=1`, the runtime-configuration hook, the
   session hook, and the static-patch installation messages.
 - The process exits normally.

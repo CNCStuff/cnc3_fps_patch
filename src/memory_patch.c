@@ -1,6 +1,6 @@
 #include "memory_patch.h"
 
-BOOL kw_write_protected(void *destination, const void *source, size_t size) {
+BOOL write_protected(void *destination, const void *source, size_t size) {
     DWORD old_protection;
     DWORD ignored;
     if (!VirtualProtect(destination, size, PAGE_EXECUTE_READWRITE, &old_protection)) {
@@ -12,7 +12,7 @@ BOOL kw_write_protected(void *destination, const void *source, size_t size) {
     return TRUE;
 }
 
-BOOL kw_allocate_executable_stub(size_t size, kw_u8 **out_stub) {
+BOOL allocate_executable_stub(size_t size, u8 **out_stub) {
     void *memory;
     if (out_stub == NULL) {
         return FALSE;
@@ -21,11 +21,11 @@ BOOL kw_allocate_executable_stub(size_t size, kw_u8 **out_stub) {
     if (memory == NULL) {
         return FALSE;
     }
-    *out_stub = (kw_u8 *)memory;
+    *out_stub = (u8 *)memory;
     return TRUE;
 }
 
-BOOL kw_finalize_executable_stub(kw_u8 *stub, size_t size) {
+BOOL finalize_executable_stub(u8 *stub, size_t size) {
     DWORD old_protection;
     if (!VirtualProtect(stub, size, PAGE_EXECUTE_READ, &old_protection)) {
         return FALSE;
@@ -33,42 +33,42 @@ BOOL kw_finalize_executable_stub(kw_u8 *stub, size_t size) {
     return FlushInstructionCache(GetCurrentProcess(), stub, size);
 }
 
-void kw_encode_u32(kw_u8 *destination, kw_u32 value) {
-    destination[0] = (kw_u8)value;
-    destination[1] = (kw_u8)(value >> 8);
-    destination[2] = (kw_u8)(value >> 16);
-    destination[3] = (kw_u8)(value >> 24);
+void encode_u32(u8 *destination, u32 value) {
+    destination[0] = (u8)value;
+    destination[1] = (u8)(value >> 8);
+    destination[2] = (u8)(value >> 16);
+    destination[3] = (u8)(value >> 24);
 }
 
-void kw_encode_rel32(kw_u8 *operand, const kw_u8 *next_instruction, const void *target) {
-    intptr_t displacement = (const kw_u8 *)target - next_instruction;
-    kw_encode_u32(operand, (kw_u32)(kw_i32)displacement);
+void encode_rel32(u8 *operand, const u8 *next_instruction, const void *target) {
+    intptr_t displacement = (const u8 *)target - next_instruction;
+    encode_u32(operand, (u32)(i32)displacement);
 }
 
-void kw_patch_transaction_init(KwPatchTransaction *transaction) {
+void patch_transaction_init(PatchTransaction *transaction) {
     transaction->count = 0;
 }
 
-BOOL kw_patch_transaction_write(KwPatchTransaction *transaction,
-                                void *destination, const void *replacement, size_t size) {
-    KwPatchRecord *record;
+BOOL patch_transaction_write(PatchTransaction *transaction,
+                             void *destination, const void *replacement, size_t size) {
+    PatchRecord *record;
     if (transaction == NULL || destination == NULL || replacement == NULL || size == 0 ||
-        size > KW_PATCH_MAX_BYTES || transaction->count >= KW_PATCH_TRANSACTION_CAPACITY) {
+        size > PATCH_MAX_BYTES || transaction->count >= PATCH_TRANSACTION_CAPACITY) {
         return FALSE;
     }
     record = &transaction->records[transaction->count];
     record->destination = destination;
     record->size = size;
     memcpy(record->original, destination, size);
-    if (!kw_write_protected(destination, replacement, size)) return FALSE;
+    if (!write_protected(destination, replacement, size)) return FALSE;
     ++transaction->count;
     return TRUE;
 }
 
-void kw_patch_transaction_rollback(KwPatchTransaction *transaction) {
+void patch_transaction_rollback(PatchTransaction *transaction) {
     if (transaction == NULL) return;
     while (transaction->count != 0) {
-        KwPatchRecord *record = &transaction->records[--transaction->count];
-        kw_write_protected(record->destination, record->original, record->size);
+        PatchRecord *record = &transaction->records[--transaction->count];
+        write_protected(record->destination, record->original, record->size);
     }
 }

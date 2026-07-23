@@ -1,17 +1,17 @@
-#ifndef KW_FPS_PATCH_CONFIG_H
-#define KW_FPS_PATCH_CONFIG_H
+#ifndef FPS_PATCH_CONFIG_H
+#define FPS_PATCH_CONFIG_H
 
-#include "kw_common.h"
+#include "common.h"
 
-typedef struct KwConfig {
+typedef struct Config {
     BOOL enabled;
-    kw_u32 target_fps;
+    u32 target_fps;
     BOOL precise_pacing;
-    kw_u32 spin_threshold_us;
+    u32 spin_threshold_us;
     BOOL logging;
-} KwConfig;
+} Config;
 
-void kw_config_set_defaults(KwConfig *config);
-BOOL kw_config_load(KwConfig *config, const wchar_t *path);
+void config_set_defaults(Config *config);
+BOOL config_load(Config *config, const wchar_t *path);
 
 #endif

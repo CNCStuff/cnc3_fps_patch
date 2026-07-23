@@ -1,4 +1,4 @@
-[kw_fps_patch]
+[fps_patch]
 
 ; Master switch. The dinput8 proxy still forwards normally when disabled.
 enabled=1
@@ -14,5 +14,5 @@ precise_pacing=1
 ; slightly more jitter. Valid range: 0..5000 microseconds.
 spin_threshold_us=400
 
-; Write kw_fps_patch.log next to the DLL.
+; Write fps_patch.log next to the DLL.
 logging=1

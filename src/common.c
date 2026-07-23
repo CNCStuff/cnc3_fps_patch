@@ -1,8 +1,8 @@
-#include "kw_common.h"
+#include "common.h"
 
 void *memcpy(void *destination, const void *source, size_t size) {
-    kw_u8 *out = (kw_u8 *)destination;
-    const kw_u8 *in = (const kw_u8 *)source;
+    u8 *out = (u8 *)destination;
+    const u8 *in = (const u8 *)source;
     while (size-- != 0) {
         *out++ = *in++;
     }
@@ -10,8 +10,8 @@ void *memcpy(void *destination, const void *source, size_t size) {
 }
 
 void *memmove(void *destination, const void *source, size_t size) {
-    kw_u8 *out = (kw_u8 *)destination;
-    const kw_u8 *in = (const kw_u8 *)source;
+    u8 *out = (u8 *)destination;
+    const u8 *in = (const u8 *)source;
     if (out < in) {
         return memcpy(destination, source, size);
     }
@@ -22,16 +22,16 @@ void *memmove(void *destination, const void *source, size_t size) {
 }
 
 void *memset(void *destination, int value, size_t size) {
-    kw_u8 *out = (kw_u8 *)destination;
+    u8 *out = (u8 *)destination;
     while (size-- != 0) {
-        *out++ = (kw_u8)value;
+        *out++ = (u8)value;
     }
     return destination;
 }
 
 int memcmp(const void *left, const void *right, size_t size) {
-    const kw_u8 *a = (const kw_u8 *)left;
-    const kw_u8 *b = (const kw_u8 *)right;
+    const u8 *a = (const u8 *)left;
+    const u8 *b = (const u8 *)right;
     while (size-- != 0) {
         if (*a != *b) {
             return (int)*a - (int)*b;
@@ -42,13 +42,13 @@ int memcmp(const void *left, const void *right, size_t size) {
     return 0;
 }
 
-kw_u32 kw_load_u32(const void *address) {
-    kw_u32 value;
+u32 load_u32(const void *address) {
+    u32 value;
     memcpy(&value, address, sizeof(value));
     return value;
 }
 
-size_t kw_ascii_length(const char *text) {
+size_t ascii_length(const char *text) {
     size_t length = 0;
     if (text != NULL) {
         while (text[length] != '\0') {
@@ -58,7 +58,7 @@ size_t kw_ascii_length(const char *text) {
     return length;
 }
 
-size_t kw_wide_length(const wchar_t *text) {
+size_t wide_length(const wchar_t *text) {
     size_t length = 0;
     if (text != NULL) {
         while (text[length] != L'\0') {
@@ -68,7 +68,7 @@ size_t kw_wide_length(const wchar_t *text) {
     return length;
 }
 
-BOOL kw_wide_copy(wchar_t *destination, size_t capacity, const wchar_t *source) {
+BOOL wide_copy(wchar_t *destination, size_t capacity, const wchar_t *source) {
     size_t i = 0;
     if (destination == NULL || source == NULL || capacity == 0) {
         return FALSE;
@@ -85,8 +85,8 @@ BOOL kw_wide_copy(wchar_t *destination, size_t capacity, const wchar_t *source) 
     return TRUE;
 }
 
-BOOL kw_wide_append(wchar_t *destination, size_t capacity, const wchar_t *suffix) {
-    size_t length = kw_wide_length(destination);
+BOOL wide_append(wchar_t *destination, size_t capacity, const wchar_t *suffix) {
+    size_t length = wide_length(destination);
     size_t i = 0;
     if (destination == NULL || suffix == NULL || length >= capacity) {
         return FALSE;
@@ -102,11 +102,11 @@ BOOL kw_wide_append(wchar_t *destination, size_t capacity, const wchar_t *suffix
     return TRUE;
 }
 
-BOOL kw_path_replace_filename(wchar_t *path, size_t capacity, const wchar_t *filename) {
-    size_t length = kw_wide_length(path);
+BOOL path_replace_filename(wchar_t *path, size_t capacity, const wchar_t *filename) {
+    size_t length = wide_length(path);
     while (length != 0 && path[length - 1] != L'\\' && path[length - 1] != L'/') {
         --length;
     }
     path[length] = L'\0';
-    return kw_wide_append(path, capacity, filename);
+    return wide_append(path, capacity, filename);
 }

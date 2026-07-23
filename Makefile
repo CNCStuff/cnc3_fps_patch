@@ -2,7 +2,7 @@ ZIG ?= zig
 TARGET := x86-windows-gnu
 
 SOURCES := \
-	src/kw_common.c \
+	src/common.c \
 	src/game_layout.c \
 	src/game_patches.c \
 	src/frame_pacer.c \
@@ -45,7 +45,7 @@ LIBDIR := zig-out/lib
 OBJECTS := $(patsubst src/%.c,$(OBJDIR)/%.obj,$(SOURCES))
 
 ifeq ($(MODE),debug)
-  CFLAGS := $(COMMON_CFLAGS) -O0 -g -DKW_DEBUG=1
+  CFLAGS := $(COMMON_CFLAGS) -O0 -g
   OUTPUT := $(BINDIR)/dinput8-debug.dll
 else
   CFLAGS := $(COMMON_CFLAGS) -O2 -DNDEBUG
@@ -80,7 +80,7 @@ package: release
 	rm -rf zig-out/package
 	mkdir -p zig-out/package
 	cp zig-out/bin/dinput8.dll zig-out/package/dinput8.dll
-	cp kw_fps_patch.ini.example zig-out/package/kw_fps_patch.ini
+	cp fps_patch.ini.example zig-out/package/fps_patch.ini
 	cp README.md zig-out/package/README.md
 	mkdir -p zig-out/package/docs
 	cp docs/implementation.md zig-out/package/docs/implementation.md
