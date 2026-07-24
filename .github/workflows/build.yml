@@ -2,7 +2,17 @@ name: Build DLL
 
 on:
   push:
+    branches:
+      - main
+    paths:
+      - src/**
+      - Makefile
+      - fps_patch.ini.example
   pull_request:
+    paths:
+      - src/**
+      - Makefile
+      - fps_patch.ini.example
   workflow_dispatch:
 
 permissions:
@@ -46,16 +56,13 @@ jobs:
           retention-days: 90
 
   publish:
-    name: Publish latest build
+    name: Publish build release
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
-    concurrency:
-      group: continuous-release
-      cancel-in-progress: false
 
     steps:
       - name: Download build artifact
@@ -64,26 +71,22 @@ jobs:
           name: fps_patch-${{ github.sha }}
           path: dist
 
-      - name: Refresh latest build release
+      - name: Publish build release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
-          if [ "$head_sha" != "$GITHUB_SHA" ]; then
-            echo "Skipping release because main has advanced to $head_sha"
+          short_sha="${GITHUB_SHA:0:12}"
+          release_tag="build-${short_sha}"
+
+          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $release_tag already exists; nothing to publish."
             exit 0
           fi
 
-          # Recreate instead of editing so GitHub shows this build's date.
-          gh release delete continuous \
-            --repo "$GITHUB_REPOSITORY" \
-            --cleanup-tag \
-            --yes 2>/dev/null || true
-
-          gh release create continuous \
+          gh release create "$release_tag" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Latest automated build" \
+            --title "Automated build ${short_sha}" \
             --notes "Automated build of commit \`$GITHUB_SHA\`." \
             --latest \
             dist/fps_patch.zip

@@ -1,4 +1,4 @@
-# fps_patch
+# Command & Conquer 3: Tiberium Wars and Kane's Wrath FPS patch
 
 [![Build DLL](https://github.com/CNCStuff/cnc3_fps_patch/actions/workflows/build.yml/badge.svg?branch=main&event=push)](https://github.com/CNCStuff/cnc3_fps_patch/actions/workflows/build.yml?query=branch%3Amain+event%3Apush)
 
@@ -13,7 +13,7 @@ automatically. The proxy forwards DirectInput calls to the system DLL.
 Reverse engineering of the game binary, the implementation and documentation were heavily LLM-assisted.
 
 ## Installation
-1. Download the newest release zip from [the automated build](https://github.com/CNCStuff/cnc3_fps_patch/releases/tag/continuous)
+1. Download the newest release zip from [the automated builds](https://github.com/CNCStuff/cnc3_fps_patch/releases/latest)
 
 2. Find the directory with the game module that you want to patch:
    - Kane's Wrath: the directory containing `cnc3ep1.dat`, such as `RetailExe\1.2`.
