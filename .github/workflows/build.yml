@@ -8,11 +8,13 @@ on:
       - src/**
       - Makefile
       - fps_patch.ini.example
+      - .github/workflows/build.yml
   pull_request:
     paths:
       - src/**
       - Makefile
       - fps_patch.ini.example
+      - .github/workflows/build.yml
   workflow_dispatch:
 
 permissions:
@@ -57,7 +59,7 @@ jobs:
 
   publish:
     name: Publish build release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
