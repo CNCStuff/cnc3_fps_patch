@@ -6,12 +6,14 @@ on:
       - main
     paths:
       - src/**
+      - scripts/**
       - Makefile
       - fps_patch.ini.example
       - .github/workflows/build.yml
   pull_request:
     paths:
       - src/**
+      - scripts/**
       - Makefile
       - fps_patch.ini.example
       - .github/workflows/build.yml
@@ -45,9 +47,10 @@ jobs:
           mkdir -p dist
           cp zig-out/bin/dinput8.dll dist/dinput8.dll
           cp fps_patch.ini.example dist/fps_patch.ini
+          cp README.md dist/README.md
           cd dist
-          zip -9 fps_patch.zip dinput8.dll fps_patch.ini
-          rm dinput8.dll fps_patch.ini
+          zip -9 fps_patch.zip dinput8.dll fps_patch.ini README.md
+          rm dinput8.dll fps_patch.ini README.md
           git show -s --format=%s "$GITHUB_SHA" > release-commit-subject.txt
 
       - name: Upload commit artifact

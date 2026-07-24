@@ -1,4 +1,5 @@
 ZIG ?= zig
+PYTHON ?= python3
 TARGET := x86-windows-gnu
 
 SOURCES := \
@@ -40,9 +41,14 @@ OBJECTS := $(patsubst src/%.c,$(OBJDIR)/%.obj,$(SOURCES))
 
 ifeq ($(MODE),debug)
   CFLAGS := $(COMMON_CFLAGS) -O0 -g
+  LDFLAGS := $(COMMON_LDFLAGS) -O0 -g
+  LINK := $(ZIG) cc
   OUTPUT := $(BINDIR)/dinput8-debug.dll
 else
   CFLAGS := $(COMMON_CFLAGS) -O2 -DNDEBUG
+  LDFLAGS := $(COMMON_LDFLAGS) -O2
+  LINK := $(PYTHON) scripts/link_release.py $(ZIG) cc
+  LINK_DEPS := scripts/link_release.py
   OUTPUT := $(BINDIR)/dinput8.dll
 endif
 
@@ -58,8 +64,8 @@ debug:
 
 build: $(OUTPUT)
 
-$(OUTPUT): $(OBJECTS) src/dinput8.def | $(BINDIR) $(LIBDIR)
-	$(ZIG) cc $(COMMON_LDFLAGS) \
+$(OUTPUT): $(OBJECTS) src/dinput8.def $(LINK_DEPS) | $(BINDIR) $(LIBDIR)
+	$(LINK) $(LDFLAGS) \
 		-Wl,/implib:$(LIBDIR)/dinput8-$(MODE).lib \
 		-Wl,/pdb:$(LIBDIR)/dinput8-$(MODE).pdb \
 		$(OBJECTS) src/dinput8.def -lkernel32 -lwinmm -o $@
