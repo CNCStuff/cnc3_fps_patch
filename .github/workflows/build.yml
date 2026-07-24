@@ -48,12 +48,15 @@ jobs:
           cd dist
           zip -9 fps_patch.zip dinput8.dll fps_patch.ini
           rm dinput8.dll fps_patch.ini
+          git show -s --format=%s "$GITHUB_SHA" > release-commit-subject.txt
 
       - name: Upload commit artifact
         uses: actions/upload-artifact@v7
         with:
           name: fps_patch-${{ github.sha }}
-          path: dist/fps_patch.zip
+          path: |
+            dist/fps_patch.zip
+            dist/release-commit-subject.txt
           if-no-files-found: error
           retention-days: 90
 
@@ -79,6 +82,8 @@ jobs:
         run: |
           short_sha="${GITHUB_SHA:0:12}"
           release_tag="build-${short_sha}"
+          build_date="$(date -u '+%Y-%m-%d %H:%M UTC')"
+          commit_subject="$(cat dist/release-commit-subject.txt)"
 
           if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $release_tag already exists; nothing to publish."
@@ -88,7 +93,9 @@ jobs:
           gh release create "$release_tag" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Automated build ${short_sha}" \
-            --notes "Automated build of commit \`$GITHUB_SHA\`." \
+            --title "Build ${build_date}" \
+            --notes "Commit: ${commit_subject}
+
+          Commit hash: \`$GITHUB_SHA\`" \
             --latest \
             dist/fps_patch.zip
