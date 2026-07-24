@@ -13,8 +13,6 @@ typedef struct Runtime {
     GameLayout game;
     /* Set under DllMain, then retained until normal code can open the log. */
     volatile LONG bootstrap_status;
-    /* 0 = unopened, 1 = one initializer running, 2 = permanently finished. */
-    volatile LONG file_init_state;
     volatile LONG proxy_checkpoint_logged;
     BOOL disabled;
     wchar_t ini_path[MAX_PATH];
@@ -27,17 +25,14 @@ typedef int (*StartSessionTailFn)(void);
 
 /* One owner for configuration, resolved addresses, and lifecycle state. */
 static Runtime g_runtime;
+static INIT_ONCE g_file_init_once = INIT_ONCE_STATIC_INIT;
 
-static BOOL initialize_runtime_files(Runtime *runtime) {
-    LONG state = InterlockedCompareExchange(&runtime->file_init_state, 1, 0);
+static BOOL CALLBACK initialize_runtime_files_once(
+    PINIT_ONCE init_once, PVOID parameter, PVOID *context) {
+    Runtime *runtime = (Runtime *)parameter;
     BOOL ini_found;
-
-    if (state == 2) return !runtime->disabled;
-    if (state == 1) {
-        /* Both bootstrap hooks and DirectInput8Create can race this once. */
-        while (InterlockedCompareExchange(&runtime->file_init_state, 1, 1) == 1) Sleep(0);
-        return runtime->file_init_state == 2 && !runtime->disabled;
-    }
+    (void)init_once;
+    (void)context;
 
     /* This runs from normal game/proxy execution, never under the loader lock. */
     config_set_defaults(&runtime->config);
@@ -50,8 +45,7 @@ static BOOL initialize_runtime_files(Runtime *runtime) {
         !path_replace_filename(runtime->log_path, ARRAY_COUNT(runtime->log_path),
                                L"fps_patch.log")) {
         runtime->disabled = TRUE;
-        InterlockedExchange(&runtime->file_init_state, 2);
-        return FALSE;
+        return TRUE;
     }
 
     ini_found = config_load(&runtime->config, runtime->ini_path);
@@ -84,8 +78,16 @@ static BOOL initialize_runtime_files(Runtime *runtime) {
         runtime->disabled = TRUE;
     }
 
-    /* State 2 is terminal even on failure; later hooks observe disabled. */
-    InterlockedExchange(&runtime->file_init_state, 2);
+    /* Returning TRUE makes initialization terminal, including disabled states. */
+    return TRUE;
+}
+
+static BOOL initialize_runtime_files(Runtime *runtime) {
+    if (!InitOnceExecuteOnce(
+            &g_file_init_once, initialize_runtime_files_once, runtime, NULL)) {
+        runtime->disabled = TRUE;
+        return FALSE;
+    }
     return !runtime->disabled;
 }
 

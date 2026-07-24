@@ -7,51 +7,62 @@ typedef HRESULT(WINAPI *DllGetClassObjectFn)(REFCLSID, REFIID, LPVOID *);
 typedef HRESULT(WINAPI *DllRegisterServerFn)(void);
 
 static HMODULE g_real_dinput8;
-/* 0 = not attempted, 1 = one thread loading, 2 = ready, -1 = last attempt failed. */
-static volatile LONG g_proxy_load_state;
+static INIT_ONCE g_proxy_init_once = INIT_ONCE_STATIC_INIT;
 static DirectInput8CreateFn g_real_direct_input_8_create;
 static DllCanUnloadNowFn g_real_dll_can_unload_now;
 static DllGetClassObjectFn g_real_dll_get_class_object;
 static DllRegisterServerFn g_real_dll_register_server;
 static DllRegisterServerFn g_real_dll_unregister_server;
 
-static BOOL load_real_dinput8(void) {
+static BOOL CALLBACK initialize_real_dinput8(
+    PINIT_ONCE init_once, PVOID parameter, PVOID *context) {
+    HMODULE module;
+    DirectInput8CreateFn direct_input_8_create;
+    DllCanUnloadNowFn dll_can_unload_now;
+    DllGetClassObjectFn dll_get_class_object;
+    DllRegisterServerFn dll_register_server;
+    DllRegisterServerFn dll_unregister_server;
     wchar_t path[MAX_PATH];
-    LONG state = InterlockedCompareExchange(&g_proxy_load_state, 1, 0);
-    if (state == 2) return TRUE;
-    if (state == 1) {
-        /* Export calls are rare; yielding avoids adding another synchronization object. */
-        while (InterlockedCompareExchange(&g_proxy_load_state, 1, 1) == 1) Sleep(0);
-        return g_proxy_load_state == 2;
-    }
+    (void)init_once;
+    (void)parameter;
+    (void)context;
 
     /* An absolute System32 path prevents the proxy from recursively loading itself. */
     if (GetSystemDirectoryW(path, ARRAY_COUNT(path)) == 0 ||
         !wide_append(path, ARRAY_COUNT(path), L"\\dinput8.dll")) {
-        InterlockedExchange(&g_proxy_load_state, -1);
         return FALSE;
     }
-    g_real_dinput8 = LoadLibraryW(path);
-    if (g_real_dinput8 == NULL) {
-        InterlockedExchange(&g_proxy_load_state, -1);
+    module = LoadLibraryW(path);
+    if (module == NULL) return FALSE;
+    direct_input_8_create =
+        (DirectInput8CreateFn)GetProcAddress(module, "DirectInput8Create");
+    dll_can_unload_now =
+        (DllCanUnloadNowFn)GetProcAddress(module, "DllCanUnloadNow");
+    dll_get_class_object =
+        (DllGetClassObjectFn)GetProcAddress(module, "DllGetClassObject");
+    dll_register_server =
+        (DllRegisterServerFn)GetProcAddress(module, "DllRegisterServer");
+    dll_unregister_server =
+        (DllRegisterServerFn)GetProcAddress(module, "DllUnregisterServer");
+    if (direct_input_8_create == NULL) {
+        FreeLibrary(module);
         return FALSE;
     }
-    g_real_direct_input_8_create =
-        (DirectInput8CreateFn)GetProcAddress(g_real_dinput8, "DirectInput8Create");
-    g_real_dll_can_unload_now =
-        (DllCanUnloadNowFn)GetProcAddress(g_real_dinput8, "DllCanUnloadNow");
-    g_real_dll_get_class_object =
-        (DllGetClassObjectFn)GetProcAddress(g_real_dinput8, "DllGetClassObject");
-    g_real_dll_register_server =
-        (DllRegisterServerFn)GetProcAddress(g_real_dinput8, "DllRegisterServer");
-    g_real_dll_unregister_server =
-        (DllRegisterServerFn)GetProcAddress(g_real_dinput8, "DllUnregisterServer");
-    if (g_real_direct_input_8_create == NULL) {
-        InterlockedExchange(&g_proxy_load_state, -1);
-        return FALSE;
-    }
-    InterlockedExchange(&g_proxy_load_state, 2);
+
+    /* Publish the fully initialized module and export table atomically via INIT_ONCE. */
+    g_real_dinput8 = module;
+    g_real_direct_input_8_create = direct_input_8_create;
+    g_real_dll_can_unload_now = dll_can_unload_now;
+    g_real_dll_get_class_object = dll_get_class_object;
+    g_real_dll_register_server = dll_register_server;
+    g_real_dll_unregister_server = dll_unregister_server;
     return TRUE;
+}
+
+static BOOL load_real_dinput8(void) {
+    /* A failed callback leaves the INIT_ONCE retryable for a later export call. */
+    return InitOnceExecuteOnce(
+        &g_proxy_init_once, initialize_real_dinput8, NULL, NULL);
 }
 
 HRESULT WINAPI DirectInput8Create(
