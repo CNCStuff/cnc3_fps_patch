@@ -18,10 +18,6 @@ HEADERS := $(wildcard src/*.h)
 COMMON_CFLAGS := \
 	-target $(TARGET) \
 	-std=c11 \
-	-ffreestanding \
-	-fno-builtin \
-	-fno-sanitize=undefined \
-	-fno-stack-protector \
 	-Wall \
 	-Wextra \
 	-Werror \
@@ -30,10 +26,8 @@ COMMON_CFLAGS := \
 COMMON_LDFLAGS := \
 	-target $(TARGET) \
 	-shared \
-	-nostdlib \
-	-Wl,--entry,DllMainCRTStartup \
 	-Wl,--subsystem,windows \
-	-Wl,--major-subsystem-version,5 \
+	-Wl,--major-subsystem-version,6 \
 	-Wl,--minor-subsystem-version,1 \
 	-Wl,--dynamicbase \
 	-Wl,--nxcompat

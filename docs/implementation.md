@@ -8,8 +8,9 @@ entry points and forwards every export to the real System32 DLL.
 
 The executable's CRT initializers must run while `g_clientUpdateFPS` is still
 30. Several static initializers derive secondary values from the retail rate.
-For that reason, `DllMainCRTStartup` does not change timing state, parse files,
-allocate detour trampolines, or start a worker thread.
+For that reason, the DLL's normal CRT startup calls a deliberately small
+`DllMain` which does not change timing state, parse files, allocate detour
+trampolines, or start a worker thread.
 
 During process attach it performs only these guarded operations:
 
@@ -150,10 +151,9 @@ coefficient in an exponential recurrence. Its retail-equivalent coefficient is:
 adjust_target = 1 - (1 - adjust_retail) ** (30 / targetFPS)
 ```
 
-The proxy is freestanding and deliberately has no CRT math dependency. The
-four supported rational exponents are evaluated with small Newton root solves
-when live GlobalData is applied. Authored settings outside the ordinary
-`(0, 1)` blend range are preserved unchanged.
+The DLL uses the normal Universal CRT `powf` implementation for this fractional
+exponent. Authored settings outside the ordinary `(0, 1)` blend range are
+preserved unchanged.
 
 Camera shake multiplies its amplitude by `0.75` once per retail client frame.
 The operand is redirected to a DLL-owned `0.75 ** (30 / targetFPS)` constant,

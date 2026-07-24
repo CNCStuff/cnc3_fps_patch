@@ -1,10 +1,9 @@
 #include "common.h"
 #include "runtime.h"
 
-BOOL WINAPI DllMainCRTStartup(HINSTANCE module, DWORD reason, LPVOID reserved) {
+BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID reserved) {
     (void)reserved;
     if (reason == DLL_PROCESS_ATTACH) {
-        DisableThreadLibraryCalls(module);
         /*
          * This executes under the loader lock. runtime_attach only validates
          * the image and installs two bootstrap branches; file I/O, allocation,

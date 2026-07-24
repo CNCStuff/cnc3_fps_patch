@@ -3,6 +3,8 @@
 #include "log.h"
 #include "memory_patch.h"
 
+#include <math.h>
+
 /*
  * Hook callbacks cannot carry user data, so they retain the immutable game
  * description selected during installation. Everything else stays local to
@@ -55,104 +57,40 @@ typedef struct PatchInstaller {
 } PatchInstaller;
 
 static BOOL select_camera_rate_constants(u32 target_fps) {
+    const float zoom_in_retail_multiplier = 0.96f;
+    const float zoom_out_retail_multiplier = 1.05f;
+    float exponent;
+
+    if (target_fps == 0) return FALSE;
+    exponent = (float)g_retail_visual_fps / (float)target_fps;
     /*
      * Held zoom is an affine recurrence, not a linear distance. These are the
-     * exact fractional powers of the retail 30 Hz transforms:
+     * fractional affine steps of the retail 30 Hz transforms:
      *
      *   zoom in:  z' = 0.96*z - 1
      *   zoom out: z' = 1.05*z + 1
      *
-     * Repeating the selected step target_fps times produces exactly the same
+     * Repeating each selected step target_fps times produces the same
      * one-second transform as repeating the retail step thirty times.
      */
-    switch (target_fps) {
-    case 45u:
-        g_zoom_in_step.multiplier = 0.973152319f;
-        g_zoom_in_step.offset = -0.671192018f;
-        g_zoom_out_step.multiplier = 1.033061554f;
-        g_zoom_out_step.offset = 0.661231083f;
-        g_camera_shake_decay = 0.825481812f;
-        break;
-    case 60u:
-        g_zoom_in_step.multiplier = 0.979795897f;
-        g_zoom_in_step.offset = -0.505102572f;
-        g_zoom_out_step.multiplier = 1.024695077f;
-        g_zoom_out_step.offset = 0.493901532f;
-        g_camera_shake_decay = 0.866025404f;
-        break;
-    case 75u:
-        g_zoom_in_step.multiplier = 0.983803794f;
-        g_zoom_in_step.offset = -0.404905142f;
-        g_zoom_out_step.multiplier = 1.019707749f;
-        g_zoom_out_step.offset = 0.394154980f;
-        g_camera_shake_decay = 0.891301229f;
-        break;
-    case 90u:
-        g_zoom_in_step.multiplier = 0.986484830f;
-        g_zoom_in_step.offset = -0.337879257f;
-        g_zoom_out_step.multiplier = 1.016396357f;
-        g_zoom_out_step.offset = 0.327927136f;
-        g_camera_shake_decay = 0.908560296f;
-        break;
-    default:
-        return FALSE;
-    }
-    g_camera_scroll_scale = (float)g_retail_visual_fps / (float)target_fps;
+    g_zoom_in_step.multiplier = powf(zoom_in_retail_multiplier, exponent);
+    g_zoom_in_step.offset =
+        -1.0f * (1.0f - g_zoom_in_step.multiplier) /
+        (1.0f - zoom_in_retail_multiplier);
+    g_zoom_out_step.multiplier = powf(zoom_out_retail_multiplier, exponent);
+    g_zoom_out_step.offset =
+        (1.0f - g_zoom_out_step.multiplier) /
+        (1.0f - zoom_out_retail_multiplier);
+    g_camera_shake_decay = powf(0.75f, exponent);
+    g_camera_scroll_scale = exponent;
     return TRUE;
 }
 
-static float NOINLINE unit_interval_nth_root(float value, u32 degree) {
-    float estimate;
-    u32 iteration;
-
-    if (value <= 0.0f) return 0.0f;
-    if (value >= 1.0f) return 1.0f;
-
-    /*
-     * CameraAdjustSpeed is read only at session boundaries, so a compact
-     * Newton solve is preferable to importing a CRT powf dependency into the
-     * freestanding proxy. Keeping this helper out of line avoids duplicating
-     * the loop for each rational exponent; 24 iterations also cover blend
-     * values very close to either endpoint of the float interval.
-     */
-    estimate = 1.0f;
-    for (iteration = 0; iteration < 24u; ++iteration) {
-        float denominator = 1.0f;
-        u32 power;
-        for (power = 1u; power < degree; ++power) denominator *= estimate;
-        estimate = ((float)(degree - 1u) * estimate + value / denominator) /
-                   (float)degree;
-    }
-    return estimate;
-}
-
 static float normalize_camera_adjust_speed(float retail, u32 target_fps) {
-    float retained;
-
     /* Values outside (0,1) are nonstandard overshoot modes; preserve them. */
     if (retail <= 0.0f || retail >= 1.0f) return retail;
-    retained = 1.0f - retail;
-    switch (target_fps) {
-    case 45u: {
-        float root = unit_interval_nth_root(retained, 3u);
-        retained = root * root;
-        break;
-    }
-    case 60u:
-        retained = unit_interval_nth_root(retained, 2u);
-        break;
-    case 75u: {
-        float root = unit_interval_nth_root(retained, 5u);
-        retained = root * root;
-        break;
-    }
-    case 90u:
-        retained = unit_interval_nth_root(retained, 3u);
-        break;
-    default:
-        return retail;
-    }
-    return 1.0f - retained;
+    return 1.0f - powf(1.0f - retail,
+                       (float)g_retail_visual_fps / (float)target_fps);
 }
 
 static void *active_w3d_view(void) {

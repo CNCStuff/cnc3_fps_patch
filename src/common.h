@@ -11,6 +11,8 @@
 #include <mmsystem.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
+#include <wchar.h>
 
 #if !defined(_WIN32) || !defined(__i386__)
 #error "fps_patch must be built for 32-bit Windows (x86-windows)."
@@ -27,15 +29,7 @@ typedef uint32_t u32;
 typedef uint64_t u64;
 typedef int32_t i32;
 
-/* The DLL is linked with -nostdlib; keep the tiny required CRT surface local. */
-void *memcpy(void *destination, const void *source, size_t size);
-void *memmove(void *destination, const void *source, size_t size);
-void *memset(void *destination, int value, size_t size);
-int memcmp(const void *left, const void *right, size_t size);
-
 u32 load_u32(const void *address);
-size_t ascii_length(const char *text);
-size_t wide_length(const wchar_t *text);
 BOOL wide_copy(wchar_t *destination, size_t capacity, const wchar_t *source);
 BOOL wide_append(wchar_t *destination, size_t capacity, const wchar_t *suffix);
 /* Retains the directory portion, including its final separator. */

@@ -1,5 +1,7 @@
 #include "log.h"
 
+#include <stdio.h>
+
 static HANDLE g_log_file = INVALID_HANDLE_VALUE;
 static BOOL g_log_enabled;
 
@@ -8,21 +10,6 @@ static void write_raw(const char *data, size_t size) {
     if (!g_log_enabled || g_log_file == INVALID_HANDLE_VALUE || data == NULL || size == 0) return;
     /* Logging is diagnostic-only; a failed write must never disable the patch. */
     WriteFile(g_log_file, data, (DWORD)size, &written, NULL);
-}
-
-/* Decimal formatting is local because the DLL deliberately has no CRT. */
-static size_t format_u32(char *buffer, size_t capacity, u32 value) {
-    char reverse[16];
-    size_t count = 0;
-    size_t i;
-    do {
-        reverse[count++] = (char)('0' + (value % 10u));
-        value /= 10u;
-    } while (value != 0 && count < sizeof(reverse));
-    if (count >= capacity) return 0;
-    for (i = 0; i < count; ++i) buffer[i] = reverse[count - 1u - i];
-    buffer[count] = '\0';
-    return count;
 }
 
 BOOL log_open(const wchar_t *path, BOOL enabled) {
@@ -42,7 +29,7 @@ void log_close(void) {
 }
 
 void log_text(const char *text) {
-    write_raw(text, ascii_length(text));
+    if (text != NULL) write_raw(text, strlen(text));
 }
 
 void log_line(const char *text) {
@@ -53,18 +40,13 @@ void log_line(const char *text) {
 void log_u32(const char *label, u32 value) {
     char number[16];
     log_text(label);
-    format_u32(number, sizeof(number), value);
+    snprintf(number, sizeof(number), "%u", (unsigned int)value);
     log_line(number);
 }
 
 void log_hex32(const char *label, u32 value) {
-    static const char digits[] = "0123456789ABCDEF";
     char text[11];
-    int i;
-    text[0] = '0';
-    text[1] = 'x';
-    for (i = 0; i < 8; ++i) text[2 + i] = digits[(value >> ((7 - i) * 4)) & 0xFu];
-    text[10] = '\0';
+    snprintf(text, sizeof(text), "0x%08X", (unsigned int)value);
     log_text(label);
     log_line(text);
 }

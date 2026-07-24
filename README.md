@@ -58,6 +58,9 @@ But be aware that this is still beta-quality software: do not yet use it in impo
 
 Please report any issues, such as crashes, animations or any other effects/gameplay going faster/slower than expected to https://github.com/CNCStuff/cnc3_fps_patch/issues. Feedback is appreciated!
 
+Windows 7 users who are missing the Universal CRT can install
+[Microsoft's Universal C Runtime update](https://support.microsoft.com/en-us/servicing/os/windows/2020/06/update-for-universal-c-runtime-in-windows).
+
 ## License
 
 WTFPL Version 2. See [LICENSE](LICENSE).
