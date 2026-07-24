@@ -82,9 +82,6 @@ package: release
 	cp zig-out/bin/dinput8.dll zig-out/package/dinput8.dll
 	cp fps_patch.ini.example zig-out/package/fps_patch.ini
 	cp README.md zig-out/package/README.md
-	mkdir -p zig-out/package/docs
-	cp docs/implementation.md zig-out/package/docs/implementation.md
-	cp docs/testing.md zig-out/package/docs/testing.md
 
 clean:
 	rm -rf zig-out

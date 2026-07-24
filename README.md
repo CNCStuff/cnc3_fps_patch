@@ -42,15 +42,14 @@ There was limited gameplay testing, but so far:
 
 - Audio delay is properly adjusted so that it matches with actual gameplay and visual effects.
 
-## Known issues
+- Camera input in Kane's Wrath and Tiberium Wars is normalized to its retail
+  30 FPS speed. This covers edge scrolling, right-mouse drag scrolling,
+  arrow-key movement, held-key zoom, keyboard rotation, terrain-height
+  settling, and camera-shake decay. Mouse-wheel zoom remains one stock step
+  per physical wheel detent because that path is event-driven rather than
+  evaluated once per rendered frame.
 
-Some camera controls are too fast at higher FPS:
-
-- Edge scrolling
-- Zoom
-- Arrow keys
-
-### Multiplayer
+## Multiplayer
 No proper multiplayer testing was done yet, so it'll be appreciated if you try! In theory, the patch should **not** cause any desyncs, and moreover, should work fine if only one player has the patch, while others play with the vanilla game. This is because the actual game logic still runs at the same speed.
 
 But be aware that this is still beta-quality software: do not yet use it in important matches, official competitions and so on.

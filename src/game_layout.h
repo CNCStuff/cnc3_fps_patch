@@ -50,6 +50,17 @@ typedef struct W3DClockLayout {
     u32 normal_advance_block;
 } W3DClockLayout;
 
+typedef struct CameraInputLayout {
+    /* SAGE 3 camera controls which are evaluated once per client frame. */
+    u32 w3d_view_pointer;
+    u32 scroll_by_function;
+    u32 zoom_in_behavior_function;
+    u32 zoom_out_behavior_function;
+    u32 camera_adjust_instruction;
+    u32 shake_decay_operand;
+    u32 retail_shake_decay;
+} CameraInputLayout;
+
 typedef struct VisualLayout {
     /* Shared retail 1/30 scalar and selected instruction operands that read it. */
     u32 retail_step;
@@ -101,6 +112,7 @@ typedef struct GameLayout {
     TimingLayout timing;
     SchedulerLayout scheduler;
     W3DClockLayout w3d_clock;
+    CameraInputLayout camera_input;
     VisualLayout visual;
     PacingLayout pacing;
 } GameLayout;
@@ -125,7 +137,16 @@ enum {
 
     /* GlobalData fields reached through the resolved g_theWriteableGlobalData pointer. */
     GLOBAL_DATA_USE_FPS_LIMIT = 0x52,
-    GLOBAL_DATA_FPS_LIMIT = 0x54
+    GLOBAL_DATA_FPS_LIMIT = 0x54,
+
+    /* Camera settings consumed as fixed per-client-frame coefficients. */
+    GLOBAL_DATA_CAMERA_ADJUST_SPEED = 0x0B14,
+    GLOBAL_DATA_KEYBOARD_CAMERA_ROTATE_SPEED = 0x0D34,
+
+    /* W3DView/CNC3_View virtual slots used by the camera wrappers. */
+    W3D_VIEW_SCROLL_BY_SLOT = 0x14,
+    W3D_VIEW_GET_ZOOM_SLOT = 0x43,
+    W3D_VIEW_SET_ZOOM_SLOT = 0x44
 };
 
 static inline u8 *game_address(const GameLayout *game, u32 rva) {

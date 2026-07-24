@@ -14,10 +14,18 @@ static BOOL g_installed;
 /* Process-lifetime storage used as replacement targets for absolute operands. */
 static float g_visual_client_step;
 static float g_client_frames_per_millisecond;
+static float g_camera_scroll_scale;
+static float g_camera_shake_decay;
 static u32 g_retail_visual_fps = 30u;
 /* Fractional-rate state is reset whenever a game session starts. */
 static u32 g_particle_update_accumulator;
 static u32 g_w3d_time_remainder;
+/* Live GlobalData camera settings may be restored between game sessions. */
+static float g_retail_camera_adjust_speed;
+static float g_applied_camera_adjust_speed;
+static float g_retail_keyboard_rotate_speed;
+static float g_applied_keyboard_rotate_speed;
+static BOOL g_camera_settings_captured;
 
 enum {
     LOGIC_FPS = 15u,
@@ -27,12 +35,178 @@ enum {
 
 typedef u32(THISCALL *GameClientGetFrameNumberFn)(void *game_client);
 typedef void(THISCALL *SubsystemUpdateFn)(void *subsystem);
+typedef int(THISCALL *W3DViewScrollByFn)(void *view, const float *delta);
+typedef float(THISCALL *W3DViewGetZoomFn)(void *view);
+typedef int(THISCALL *W3DViewSetZoomFn)(void *view, float zoom);
+
+typedef struct ZoomStep {
+    float multiplier;
+    float offset;
+} ZoomStep;
+
+static W3DViewScrollByFn g_original_scroll_by;
+static ZoomStep g_zoom_in_step;
+static ZoomStep g_zoom_out_step;
 
 typedef struct PatchInstaller {
     /* A mismatch poisons the remaining install; the caller rolls back once. */
     PatchTransaction transaction;
     BOOL ok;
 } PatchInstaller;
+
+static BOOL select_camera_rate_constants(u32 target_fps) {
+    /*
+     * Held zoom is an affine recurrence, not a linear distance. These are the
+     * exact fractional powers of the retail 30 Hz transforms:
+     *
+     *   zoom in:  z' = 0.96*z - 1
+     *   zoom out: z' = 1.05*z + 1
+     *
+     * Repeating the selected step target_fps times produces exactly the same
+     * one-second transform as repeating the retail step thirty times.
+     */
+    switch (target_fps) {
+    case 45u:
+        g_zoom_in_step.multiplier = 0.973152319f;
+        g_zoom_in_step.offset = -0.671192018f;
+        g_zoom_out_step.multiplier = 1.033061554f;
+        g_zoom_out_step.offset = 0.661231083f;
+        g_camera_shake_decay = 0.825481812f;
+        break;
+    case 60u:
+        g_zoom_in_step.multiplier = 0.979795897f;
+        g_zoom_in_step.offset = -0.505102572f;
+        g_zoom_out_step.multiplier = 1.024695077f;
+        g_zoom_out_step.offset = 0.493901532f;
+        g_camera_shake_decay = 0.866025404f;
+        break;
+    case 75u:
+        g_zoom_in_step.multiplier = 0.983803794f;
+        g_zoom_in_step.offset = -0.404905142f;
+        g_zoom_out_step.multiplier = 1.019707749f;
+        g_zoom_out_step.offset = 0.394154980f;
+        g_camera_shake_decay = 0.891301229f;
+        break;
+    case 90u:
+        g_zoom_in_step.multiplier = 0.986484830f;
+        g_zoom_in_step.offset = -0.337879257f;
+        g_zoom_out_step.multiplier = 1.016396357f;
+        g_zoom_out_step.offset = 0.327927136f;
+        g_camera_shake_decay = 0.908560296f;
+        break;
+    default:
+        return FALSE;
+    }
+    g_camera_scroll_scale = (float)g_retail_visual_fps / (float)target_fps;
+    return TRUE;
+}
+
+static float NOINLINE unit_interval_nth_root(float value, u32 degree) {
+    float estimate;
+    u32 iteration;
+
+    if (value <= 0.0f) return 0.0f;
+    if (value >= 1.0f) return 1.0f;
+
+    /*
+     * CameraAdjustSpeed is read only at session boundaries, so a compact
+     * Newton solve is preferable to importing a CRT powf dependency into the
+     * freestanding proxy. Keeping this helper out of line avoids duplicating
+     * the loop for each rational exponent; 24 iterations also cover blend
+     * values very close to either endpoint of the float interval.
+     */
+    estimate = 1.0f;
+    for (iteration = 0; iteration < 24u; ++iteration) {
+        float denominator = 1.0f;
+        u32 power;
+        for (power = 1u; power < degree; ++power) denominator *= estimate;
+        estimate = ((float)(degree - 1u) * estimate + value / denominator) /
+                   (float)degree;
+    }
+    return estimate;
+}
+
+static float normalize_camera_adjust_speed(float retail, u32 target_fps) {
+    float retained;
+
+    /* Values outside (0,1) are nonstandard overshoot modes; preserve them. */
+    if (retail <= 0.0f || retail >= 1.0f) return retail;
+    retained = 1.0f - retail;
+    switch (target_fps) {
+    case 45u: {
+        float root = unit_interval_nth_root(retained, 3u);
+        retained = root * root;
+        break;
+    }
+    case 60u:
+        retained = unit_interval_nth_root(retained, 2u);
+        break;
+    case 75u: {
+        float root = unit_interval_nth_root(retained, 5u);
+        retained = root * root;
+        break;
+    }
+    case 90u:
+        retained = unit_interval_nth_root(retained, 3u);
+        break;
+    default:
+        return retail;
+    }
+    return 1.0f - retained;
+}
+
+static void *active_w3d_view(void) {
+    if (g_game == NULL) return NULL;
+    return *(void **)game_address(g_game, g_game->camera_input.w3d_view_pointer);
+}
+
+static int THISCALL scroll_by_at_retail_speed(void *view, const float *delta) {
+    float scaled[2];
+
+    if (g_original_scroll_by == NULL) return 0;
+    if (delta == NULL) return g_original_scroll_by(view, NULL);
+    /*
+     * Arrow, RMB-drag, and edge scrolling all converge on W3DView::scrollBy.
+     * Scaling here also makes the view's stored m_scrollAmount agree with the
+     * actual world displacement used by terrain-height adjustment.
+     */
+    scaled[0] = delta[0] * g_camera_scroll_scale;
+    scaled[1] = delta[1] * g_camera_scroll_scale;
+    return g_original_scroll_by(view, scaled);
+}
+
+static int apply_held_zoom(const ZoomStep *step) {
+    void *view = active_w3d_view();
+    void **vtable;
+    W3DViewGetZoomFn get_zoom;
+    W3DViewSetZoomFn set_zoom;
+    float zoom;
+
+    if (view == NULL) return 0;
+    vtable = *(void ***)view;
+    get_zoom = (W3DViewGetZoomFn)vtable[W3D_VIEW_GET_ZOOM_SLOT];
+    set_zoom = (W3DViewSetZoomFn)vtable[W3D_VIEW_SET_ZOOM_SLOT];
+    zoom = get_zoom(view);
+    return set_zoom(view, zoom * step->multiplier + step->offset);
+}
+
+static int THISCALL held_zoom_in_at_retail_speed(
+    void *behavior, int context, char active, int scroll, int rotate) {
+    (void)behavior;
+    (void)context;
+    (void)scroll;
+    (void)rotate;
+    return active ? apply_held_zoom(&g_zoom_in_step) : 0;
+}
+
+static int THISCALL held_zoom_out_at_retail_speed(
+    void *behavior, int context, char active, int scroll, int rotate) {
+    (void)behavior;
+    (void)context;
+    (void)scroll;
+    (void)rotate;
+    return active ? apply_held_zoom(&g_zoom_out_step) : 0;
+}
 
 /*
  * KW 1.02 GameEngine_DispatchLogicPhase (Steam VA 0x006560A6) batches the
@@ -279,6 +453,85 @@ static void install_continuous_visuals(PatchInstaller *installer) {
                   visual->model_step_operand, retail_step, &g_visual_client_step);
 }
 
+static void patch_entry_jump(PatchInstaller *installer, const char *name,
+                             u32 function_rva, const void *target) {
+    static const u8 expected[] = { 0x80, 0x7C, 0x24, 0x08, 0x00 };
+    u8 replacement[sizeof(expected)] = { 0xE9, 0, 0, 0, 0 };
+
+    encode_rel32(&replacement[1], game_address(g_game, function_rva + 5u), target);
+    patch_bytes(installer, name, function_rva,
+                expected, replacement, sizeof(replacement));
+}
+
+static void install_camera_timing(PatchInstaller *installer) {
+    static const u8 camera_adjust_instruction[] = {
+        0xD8, 0x8F, 0x14, 0x0B, 0x00, 0x00
+    };
+    static const u8 shake_instruction[] = { 0xF3, 0x0F, 0x59, 0x05 };
+    const CameraInputLayout *camera = &g_game->camera_input;
+    void *view;
+    void **vtable;
+    void **scroll_entry;
+    uintptr_t module_base;
+    uintptr_t entry_address;
+    u32 entry_rva;
+    void *scroll_function;
+
+    if (!installer->ok) return;
+
+    /*
+     * Runtime configuration is reached after W3DView construction. Resolve
+     * its actual derived-class vtable rather than assuming a fixed .rdata RVA,
+     * then prove that slot 0x14 still points at the signature-found scrollBy.
+     */
+    view = active_w3d_view();
+    if (view == NULL) {
+        log_line("ERROR: live W3DView pointer is null");
+        installer->ok = FALSE;
+        return;
+    }
+    vtable = *(void ***)view;
+    scroll_entry = &vtable[W3D_VIEW_SCROLL_BY_SLOT];
+    module_base = (uintptr_t)g_game->module;
+    entry_address = (uintptr_t)scroll_entry;
+    if (entry_address < module_base ||
+        entry_address - module_base > g_game->pe_size_of_image - sizeof(void *)) {
+        log_line("ERROR: W3DView scrollBy vtable entry is outside the game image");
+        installer->ok = FALSE;
+        return;
+    }
+    entry_rva = (u32)(entry_address - module_base);
+    scroll_function = game_address(g_game, camera->scroll_by_function);
+    g_original_scroll_by = (W3DViewScrollByFn)scroll_function;
+    patch_pointer(installer, "W3DView scrollBy vtable entry",
+                  entry_rva, scroll_function, scroll_by_at_retail_speed);
+
+    /*
+     * Only the held-key behaviors are replaced. The mouse-wheel handler keeps
+     * calling the stock zoomIn/zoomOut methods once per physical wheel detent.
+     */
+    patch_entry_jump(installer, "held zoom-in behavior",
+                     camera->zoom_in_behavior_function,
+                     held_zoom_in_at_retail_speed);
+    patch_entry_jump(installer, "held zoom-out behavior",
+                     camera->zoom_out_behavior_function,
+                     held_zoom_out_at_retail_speed);
+
+    /* The live GlobalData fields are changed later, after all code writes succeed. */
+    expect_bytes(installer, "camera height-adjust instruction",
+                 camera->camera_adjust_instruction,
+                 camera_adjust_instruction, sizeof(camera_adjust_instruction));
+
+    /* Preserve the retail 30 Hz camera-shake half-life at the raised client rate. */
+    expect_bytes(installer, "camera shake damping instruction",
+                 camera->shake_decay_operand - sizeof(shake_instruction),
+                 shake_instruction, sizeof(shake_instruction));
+    patch_pointer(installer, "camera shake damping operand",
+                  camera->shake_decay_operand,
+                  game_address(g_game, camera->retail_shake_decay),
+                  &g_camera_shake_decay);
+}
+
 static void install_frame_authored_effects(PatchInstaller *installer) {
     const VisualLayout *visual = &g_game->visual;
 
@@ -512,7 +765,9 @@ BOOL game_patches_install(const GameLayout *game, const Config *config,
 
     /* Bootstrap and session hooks can both arrive; code bytes are patched once. */
     if (g_installed) return TRUE;
-    if (game == NULL || config == NULL || (config->precise_pacing && pacing_stub == NULL)) {
+    if (game == NULL || config == NULL ||
+        (config->precise_pacing && pacing_stub == NULL) ||
+        !select_camera_rate_constants(config->target_fps)) {
         return FALSE;
     }
     g_game = game;
@@ -525,6 +780,7 @@ BOOL game_patches_install(const GameLayout *game, const Config *config,
     installer.ok = TRUE;
 
     install_continuous_visuals(&installer);
+    install_camera_timing(&installer);
     install_frame_authored_effects(&installer);
     install_particle_and_cursor_timing(&installer);
     install_phase_scheduler(&installer);
@@ -540,12 +796,49 @@ BOOL game_patches_install(const GameLayout *game, const Config *config,
     log_line("Six logic phases distributed across the configured client-frame rate");
     log_line("W3D time preserves the retail 990 milliseconds per nominal second");
     log_line("Radius-cursor opacity throb converted using the live client FPS");
+    log_line("Camera scrolling, held zoom/rotation, settling and shake normalized");
     return TRUE;
 
 rollback:
     log_line("ERROR: patch installation failed; rolling back static patches");
     patch_transaction_rollback(&installer.transaction);
     return FALSE;
+}
+
+static void apply_live_camera_settings(void) {
+    u8 *global_data;
+    float *camera_adjust;
+    float *keyboard_rotate;
+
+    if (g_game == NULL || g_config == NULL) return;
+    global_data = *(u8 **)game_address(g_game, g_game->timing.global_data_pointer);
+    if (global_data == NULL) return;
+
+    camera_adjust = (float *)(global_data + GLOBAL_DATA_CAMERA_ADJUST_SPEED);
+    keyboard_rotate =
+        (float *)(global_data + GLOBAL_DATA_KEYBOARD_CAMERA_ROTATE_SPEED);
+
+    /*
+     * A session/configuration reload may restore authored GlobalData values.
+     * Capture a changed incoming value, but do not mistake our own previously
+     * applied coefficient for a new retail baseline.
+     */
+    if (!g_camera_settings_captured ||
+        load_u32(camera_adjust) != load_u32(&g_applied_camera_adjust_speed)) {
+        g_retail_camera_adjust_speed = *camera_adjust;
+    }
+    if (!g_camera_settings_captured ||
+        load_u32(keyboard_rotate) != load_u32(&g_applied_keyboard_rotate_speed)) {
+        g_retail_keyboard_rotate_speed = *keyboard_rotate;
+    }
+
+    g_applied_camera_adjust_speed = normalize_camera_adjust_speed(
+        g_retail_camera_adjust_speed, g_config->target_fps);
+    g_applied_keyboard_rotate_speed =
+        g_retail_keyboard_rotate_speed * g_camera_scroll_scale;
+    *camera_adjust = g_applied_camera_adjust_speed;
+    *keyboard_rotate = g_applied_keyboard_rotate_speed;
+    g_camera_settings_captured = TRUE;
 }
 
 void game_patches_reset_state(void) {
@@ -556,5 +849,6 @@ void game_patches_reset_state(void) {
         /* First direct reader gets floor(990/FPS); the hook distributes remainder. */
         *(u32 *)game_address(g_game, g_game->timing.w3d_milliseconds_per_frame) =
             W3D_RETAIL_MILLISECONDS_PER_SECOND / g_config->target_fps;
+        apply_live_camera_settings();
     }
 }

@@ -56,6 +56,50 @@ static const u16 g_model_pattern[] = {
     PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY
 };
 
+/*
+ * TW and KW share this camera-input implementation byte-for-byte. It is
+ * evaluated once per client frame, so scroll input, held zoom/rotation keys,
+ * terrain-height settling, and legacy camera shake need separate scaling.
+ */
+static const u16 g_camera_zoom_behavior_pair_pattern[] = {
+    0x80, 0x7C, 0x24, 0x08, 0x00, 0x74, 0x0E, 0x8B, 0x0D,
+    PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x8B, 0x01, 0xFF, 0x90, 0x14, 0x01, 0x00, 0x00, 0xC2, 0x10, 0x00,
+    0x80, 0x7C, 0x24, 0x08, 0x00, 0x74, 0x0E, 0x8B, 0x0D,
+    PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x8B, 0x01, 0xFF, 0x90, 0x18, 0x01, 0x00, 0x00, 0xC2, 0x10, 0x00
+};
+static const u16 g_camera_rotate_behavior_pattern[] = {
+    0x80, 0x7C, 0x24, 0x08, 0x00, 0x74, 0x1E, 0xA1,
+    PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0xF3, 0x0F, 0x10, 0x80, 0x34, 0x0D, 0x00, 0x00,
+    0x8B, 0x44, 0x24, 0x10, 0xF3, 0x0F, 0x59, 0x41, 0x04,
+    0xF3, 0x0F, 0x58, 0x00, 0xF3, 0x0F, 0x11, 0x00, 0xC2, 0x10, 0x00
+};
+static const u16 g_camera_scroll_by_pattern[] = {
+    0x55, 0x8B, 0xEC, 0xA1,
+    PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x83, 0xEC, 0x64, 0x80, 0xB8, 0xCC, 0x00, 0x00, 0x00, 0x00,
+    0x53, 0x8B, 0xD9, 0x74, 0x0D, 0x80, 0x7B, 0x44, 0x00, 0x74, 0x07,
+    0x33, 0xC0, 0xE9,
+    PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x80, 0xBB, 0xF1, 0x24, 0x00, 0x00, 0x00, 0x75, 0xF0
+};
+static const u16 g_camera_adjust_pattern[] = {
+    0xD9, 0x45, 0xF8, 0xD8, 0x65, 0xF4,
+    0xD8, 0x8F, 0x14, 0x0B, 0x00, 0x00,
+    0xD9, 0x5D, 0xF4, 0xD9, 0x45, 0xF4, 0xD9, 0xE1, 0xDD, 0x05,
+    PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY
+};
+static const u16 g_camera_shake_pattern[] = {
+    0xA1, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x80, 0xB8, 0x44, 0x0F, 0x00, 0x00, 0x00, 0x74, 0x09,
+    0x80, 0xB8, 0x45, 0x0F, 0x00, 0x00, 0x00, 0x74, 0x22,
+    0xF3, 0x0F, 0x59, 0x05,
+    PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0xF3, 0x0F, 0x11, 0x43, 0x78
+};
+
 /* Absolute client-frame consumers whose authored data remains in 30 Hz units. */
 static const u16 g_tracer_reset_pattern[] = {
     0x8B, 0x01, 0xFF, 0x50, 0x78, 0x89, 0x86, 0x90, 0x00, 0x00, 0x00, 0x5E, 0xC3
@@ -385,6 +429,55 @@ static BOOL resolve_bootstrap_sites(
     return TRUE;
 }
 
+static BOOL resolve_camera_input_sites(
+    u8 *module, IMAGE_NT_HEADERS32 *nt, GameLayout *game) {
+    CameraInputLayout *camera = &game->camera_input;
+    u32 match;
+    u32 second_view_pointer;
+    u32 rotate_behavior_function;
+    u32 rotate_global_data_pointer;
+
+    /*
+     * The adjacent 24-byte held-zoom behaviors are an especially strong
+     * anchor: both load the same W3DView singleton and call slots 0x45/0x46.
+     * Mouse-wheel zoom has a separate caller and is intentionally not hooked.
+     */
+    if (!FIND_UNIQUE(module, nt, g_camera_zoom_behavior_pair_pattern, &match) ||
+        !read_absolute_rva(module, game->pe_size_of_image, match + 9u,
+                           &camera->w3d_view_pointer) ||
+        !read_absolute_rva(module, game->pe_size_of_image, match + 33u,
+                           &second_view_pointer) ||
+        second_view_pointer != camera->w3d_view_pointer) {
+        return FALSE;
+    }
+    camera->zoom_in_behavior_function = match;
+    camera->zoom_out_behavior_function = match + 24u;
+
+    if (!FIND_UNIQUE(module, nt, g_camera_rotate_behavior_pattern,
+                     &rotate_behavior_function) ||
+        !read_absolute_rva(module, game->pe_size_of_image,
+                           rotate_behavior_function + 8u,
+                           &rotate_global_data_pointer) ||
+        rotate_global_data_pointer != game->timing.global_data_pointer ||
+        !FIND_UNIQUE(module, nt, g_camera_scroll_by_pattern,
+                     &camera->scroll_by_function) ||
+        !FIND_UNIQUE(module, nt, g_camera_adjust_pattern, &match)) {
+        return FALSE;
+    }
+    camera->camera_adjust_instruction = match + 6u;
+
+    if (!FIND_UNIQUE(module, nt, g_camera_shake_pattern, &match)) return FALSE;
+    camera->shake_decay_operand = match + 27u;
+    if (!read_absolute_rva(module, game->pe_size_of_image,
+                           camera->shake_decay_operand,
+                           &camera->retail_shake_decay) ||
+        load_u32(module + camera->retail_shake_decay) != 0x3F400000u) {
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
 static BOOL resolve_visual_sites(
     u8 *module, IMAGE_NT_HEADERS32 *nt, GameLayout *game) {
     VisualLayout *visual = &game->visual;
@@ -630,10 +723,22 @@ GameResolveResult resolve_game_layout(GameLayout *out_game, u8 *module) {
      * against globals found by earlier ones. Timestamp and entry point are
      * diagnostic only; instruction semantics decide compatibility.
      */
-    if (!resolve_bootstrap_sites(module, nt, &game) ||
-        !resolve_visual_sites(module, nt, &game) ||
-        !resolve_pacing_sites(module, nt, &game) ||
-        !resolve_cached_timing_values(module, nt, &game) ||
+    if (!resolve_bootstrap_sites(module, nt, &game)) {
+        return GAME_UNSUPPORTED_BUILD;
+    }
+    if (!resolve_visual_sites(module, nt, &game) ||
+        !resolve_pacing_sites(module, nt, &game)) {
+        return GAME_UNSUPPORTED_BUILD;
+    }
+    /*
+     * Resolve camera input after GlobalData so the rotation operand can be
+     * proved to reference the same singleton used by the live timing code.
+     * TW 1.09/1.10 and all supported KW builds share these exact functions.
+     */
+    if (!resolve_camera_input_sites(module, nt, &game)) {
+        return GAME_UNSUPPORTED_BUILD;
+    }
+    if (!resolve_cached_timing_values(module, nt, &game) ||
         !resolve_scheduler_sites(module, nt, &game) ||
         !resolve_w3d_clock_sites(module, nt, &game) ||
         load_u32(module + game.timing.logic_fps) != 15u ||

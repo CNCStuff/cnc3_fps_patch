@@ -74,6 +74,96 @@ Each instruction operand is checked against the relocated retail address at
 the point it is replaced. All three writes share one transaction, so a later
 mismatch or write failure restores the earlier operands.
 
+## Camera input normalization
+
+Kane's Wrath and Tiberium Wars evaluate tactical camera input once per client
+frame. Raising the client rate therefore repeats several stock per-frame
+operations too often unless they are normalized independently. TW 1.09/1.10
+and all supported KW builds share the relevant instruction sequences and
+object layouts byte-for-byte, despite their functions residing at different
+addresses.
+
+Representative VAs are shown below. The resolver does not use these addresses
+as build identity:
+
+```text
+Build                 scrollBy   rotation   zoom in/out          adjust     shake operand
+KW 1.02 Steam 2012    0x49B160   0x95F7F2   0x95F81A/0x95F832   0x49AEBF   0x49AC2F
+TW 1.09               0x4987F0   0x99B8AB   0x99B8D3/0x99B8EB   0x49854C   0x498326
+TW 1.10               0x82F635   0x778AD7   0x778AFF/0x778B17   0x82F391   0x82F16B
+```
+
+Resolution also proves that both held-zoom behaviors use the same W3DView
+singleton, keyboard rotation uses the same GlobalData singleton as the timing
+patch, W3DView slot `0x14` still points to the matched `scrollBy` function, and
+camera shake still references the retail `0.75` constant.
+
+### Scrolling and arrow keys
+
+Edge scrolling, right-mouse drag scrolling, and arrow-key movement all
+converge on the same `W3DView::scrollBy` virtual method. The patch replaces the
+live derived-class vtable entry after proving that it still points to the
+signature-resolved function. Its wrapper scales the two-dimensional delta by:
+
+```text
+30 / targetFPS
+```
+
+Hooking the convergence point keeps both world displacement and the view's
+stored scroll amount in the same units. The latter is subsequently consumed by
+terrain-height adjustment, so scaling only an earlier input branch would leave
+the camera's internal state inconsistent.
+
+### Held zoom
+
+The two held-key behaviors apply affine transforms every client frame:
+
+```text
+zoom in:  z' = 0.96 * z - 1
+zoom out: z' = 1.05 * z + 1
+```
+
+A linear `30 / targetFPS` multiplier is not exact for a recurrence with both a
+multiplier and an offset. For each supported rate, the replacement behavior
+uses the fractional affine step whose repeated one-second transform equals 30
+applications of the retail step:
+
+```text
+a_target = a_retail ** (30 / targetFPS)
+b_target = b_retail * (1 - a_target) / (1 - a_retail)
+```
+
+Only the held-key behavior entries are redirected. Mouse-wheel zoom remains in
+the stock event handler and therefore still performs one original zoom step per
+physical wheel detent rather than acquiring an inappropriate frame-rate scale.
+
+### Rotation, settling, and shake
+
+Keyboard rotation reads `GlobalData::KeyboardCameraRotateSpeed` as a per-frame
+amount, so the live setting is scaled by `30 / targetFPS` at each session
+boundary.
+
+Terrain-height settling uses `GlobalData::CameraAdjustSpeed` as the blend
+coefficient in an exponential recurrence. Its retail-equivalent coefficient is:
+
+```text
+adjust_target = 1 - (1 - adjust_retail) ** (30 / targetFPS)
+```
+
+The proxy is freestanding and deliberately has no CRT math dependency. The
+four supported rational exponents are evaluated with small Newton root solves
+when live GlobalData is applied. Authored settings outside the ordinary
+`(0, 1)` blend range are preserved unchanged.
+
+Camera shake multiplies its amplitude by `0.75` once per retail client frame.
+The operand is redirected to a DLL-owned `0.75 ** (30 / targetFPS)` constant,
+preserving the same real-time decay at 45, 60, 75, and 90 FPS.
+
+GlobalData can be restored by a new game session. The patch remembers both the
+authored values and the values it last applied, so session reloads are
+renormalized without accidentally treating an already-normalized value as the
+new retail baseline.
+
 ## Six-phase logic scheduler
 
 The authoritative 15 Hz logic tick is split into six ordered phases. The
