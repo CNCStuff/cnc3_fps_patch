@@ -22,6 +22,13 @@ static u32 g_retail_visual_fps = 30u;
 /* Fractional-rate state is reset whenever a game session starts. */
 static u32 g_particle_update_accumulator;
 static u32 g_w3d_time_remainder;
+static u32 g_audio_update_accumulator;
+static u32 g_limiter_interval_remainder;
+static u32 g_limiter_interval_divisor;
+static u32 g_keyboard_last_poll_ms;
+static u32 g_keyboard_time_remainder;
+static BOOL g_keyboard_repeat_tick;
+static BOOL g_keyboard_clock_initialized;
 /* Live GlobalData camera settings may be restored between game sessions. */
 static float g_retail_camera_adjust_speed;
 static float g_applied_camera_adjust_speed;
@@ -31,12 +38,16 @@ static BOOL g_camera_settings_captured;
 
 enum {
     LOGIC_FPS = 15u,
+    RETAIL_CLIENT_FRAMES_PER_LOGIC_TICK = 2u,
     LOGIC_PHASE_COUNT = 6u,
     W3D_RETAIL_MILLISECONDS_PER_SECOND = 990u
 };
 
 typedef u32(THISCALL *GameClientGetFrameNumberFn)(void *game_client);
 typedef void(THISCALL *SubsystemUpdateFn)(void *subsystem);
+typedef u8(THISCALL *AudioUpdateFn)(void *audio_manager);
+typedef void(THISCALL *KeyboardPollFn)(void *keyboard);
+typedef u8(THISCALL *KeyboardCheckRepeatFn)(void *keyboard);
 typedef int(THISCALL *W3DViewScrollByFn)(void *view, const float *delta);
 typedef float(THISCALL *W3DViewGetZoomFn)(void *view);
 typedef int(THISCALL *W3DViewSetZoomFn)(void *view, float zoom);
@@ -47,6 +58,9 @@ typedef struct ZoomStep {
 } ZoomStep;
 
 static W3DViewScrollByFn g_original_scroll_by;
+static AudioUpdateFn g_original_audio_update;
+static KeyboardPollFn g_original_keyboard_poll;
+static KeyboardCheckRepeatFn g_original_keyboard_check_repeat;
 static ZoomStep g_zoom_in_step;
 static ZoomStep g_zoom_out_step;
 
@@ -262,6 +276,163 @@ static void THISCALL update_particles_at_retail_rate(void *manager) {
     }
 }
 
+/*
+ * Preserve the stock limiter's observed 33 ms retail client frames while
+ * subdividing them across the selected high-rate schedule. The original
+ * limiter first truncates one 30 Hz interval after applying network scale;
+ * two of those intervals are one complete 15 Hz logic-cycle budget. A
+ * remainder accumulator distributes that integer budget without replacing
+ * the game's timeGetTime/Sleep(0), no-limit, telemetry, or history paths.
+ */
+static u32 STDCALL get_retail_limiter_interval(void *engine_pointer) {
+    const PacingLayout *pacing;
+    i32 signed_multiplier;
+    u32 multiplier;
+    u32 retail_frame_ms;
+    u32 logic_cycle_budget_ms;
+    u32 scaled;
+    u32 interval;
+    float scale;
+    float logic_ms;
+
+    if (engine_pointer == NULL || g_game == NULL) return 1u;
+    pacing = &g_game->pacing;
+    signed_multiplier = *(volatile i32 *)(
+        (u8 *)engine_pointer + ENGINE_PACING_UPDATE_MULTIPLIER);
+    if (signed_multiplier < 1) signed_multiplier = 1;
+    multiplier = (u32)signed_multiplier;
+
+    scale = *(volatile float *)game_address(g_game, pacing->network_scale);
+    if (!(scale >= 0.5f)) scale = 0.5f;
+    if (scale > 1.0f) scale = 1.0f;
+    logic_ms = *(volatile float *)game_address(
+        g_game, pacing->milliseconds_per_logic_frame);
+    if (!(logic_ms > 0.0f)) return 1u;
+
+    retail_frame_ms = (u32)(
+        logic_ms /
+        ((float)RETAIL_CLIENT_FRAMES_PER_LOGIC_TICK * scale));
+    if (retail_frame_ms == 0u) return 1u;
+    logic_cycle_budget_ms =
+        retail_frame_ms * RETAIL_CLIENT_FRAMES_PER_LOGIC_TICK;
+
+    if (g_limiter_interval_divisor != multiplier) {
+        if (g_limiter_interval_divisor == 0u) {
+            g_limiter_interval_remainder = 0u;
+        } else {
+            /* Retain the same fractional phase when adaptive pacing changes. */
+            g_limiter_interval_remainder =
+                (g_limiter_interval_remainder * multiplier +
+                 g_limiter_interval_divisor / 2u) /
+                g_limiter_interval_divisor;
+        }
+        g_limiter_interval_divisor = multiplier;
+    }
+
+    scaled = g_limiter_interval_remainder + logic_cycle_budget_ms;
+    interval = scaled / multiplier;
+    g_limiter_interval_remainder = scaled % multiplier;
+    return interval != 0u ? interval : 1u;
+}
+
+/*
+ * Audio request admission, Limit accounting, playback completion, and queue
+ * cleanup all run inside the manager's client update. Retain their retail
+ * 30 Hz interleaving while the rest of the client advances at the configured
+ * rate. ComputeClientFrameDeltaMilliseconds observes the skipped client-frame
+ * span, so authored millisecond delays still advance by the correct amount.
+ */
+static u8 THISCALL update_audio_at_retail_rate(void *audio_manager) {
+    u32 target_fps;
+
+    if (g_original_audio_update == NULL) return 0;
+    if (g_config == NULL || g_config->target_fps <= g_retail_visual_fps) {
+        return g_original_audio_update(audio_manager);
+    }
+    target_fps = g_config->target_fps;
+    g_audio_update_accumulator += g_retail_visual_fps;
+    if (g_audio_update_accumulator < target_fps) return 0;
+    g_audio_update_accumulator -= target_fps;
+    return g_original_audio_update(audio_manager);
+}
+
+static void reset_keyboard_clock(void) {
+    g_keyboard_last_poll_ms = timeGetTime();
+    /* Seed one immediate tick, matching stock's first post-reset increment. */
+    g_keyboard_time_remainder = 1000u;
+    g_keyboard_repeat_tick = FALSE;
+    g_keyboard_clock_initialized = TRUE;
+}
+
+static BOOL keyboard_retail_tick_due(void) {
+    u32 now;
+    u32 elapsed;
+    u32 scaled;
+
+    if (!g_keyboard_clock_initialized) reset_keyboard_clock();
+    now = timeGetTime();
+    /* Unsigned subtraction intentionally handles timeGetTime's wraparound. */
+    elapsed = now - g_keyboard_last_poll_ms;
+    g_keyboard_last_poll_ms = now;
+    if (elapsed >= 1000u) {
+        /* A long stall still produces only one stock repeat on resumption. */
+        g_keyboard_time_remainder = 0;
+        return TRUE;
+    }
+    scaled = g_keyboard_time_remainder + elapsed * g_retail_visual_fps;
+    if (scaled < 1000u) {
+        g_keyboard_time_remainder = (u32)scaled;
+        return FALSE;
+    }
+    /* Never burst missed repeats after a stall; stock emits at most one per poll. */
+    g_keyboard_time_remainder = (u32)(scaled % 1000u);
+    return TRUE;
+}
+
+static void defer_physical_key_timestamps(void *keyboard) {
+    u8 *event;
+    u8 *end;
+    u32 next_frame;
+
+    if (keyboard == NULL) return;
+    event = *(u8 **)((u8 *)keyboard + KEYBOARD_EVENT_BEGIN);
+    end = *(u8 **)((u8 *)keyboard + KEYBOARD_EVENT_END);
+    next_frame = *(u32 *)((u8 *)keyboard + KEYBOARD_INPUT_FRAME) + 1u;
+    while (event != end) {
+        u32 key = event[0];
+        *(u32 *)((u8 *)keyboard + KEYBOARD_KEY_SEQUENCE_BASE +
+                 key * KEYBOARD_KEY_STATE_STRIDE) = next_frame;
+        event += KEYBOARD_KEY_STATE_STRIDE;
+    }
+}
+
+/*
+ * Keyboard::inputFrame is private to hardware-event timestamps and the stock
+ * autorepeat routine. Advance it on a wall-clock 30 Hz gate shared by normal,
+ * extra, and loading-screen polls, but retain every physical hardware poll.
+ */
+static void THISCALL poll_keyboard_at_retail_rate(void *keyboard) {
+    g_keyboard_repeat_tick = keyboard_retail_tick_due();
+    if (keyboard != NULL && g_keyboard_repeat_tick) {
+        ++*(u32 *)((u8 *)keyboard + KEYBOARD_INPUT_FRAME);
+    }
+    if (g_original_keyboard_poll != NULL) {
+        g_original_keyboard_poll(keyboard);
+    }
+}
+
+static u8 THISCALL check_keyboard_repeat_at_retail_rate(void *keyboard) {
+    BOOL repeat_tick = g_keyboard_repeat_tick;
+    g_keyboard_repeat_tick = FALSE;
+    if (!repeat_tick) {
+        /* Retail would first observe these events on the next 30 Hz tick. */
+        defer_physical_key_timestamps(keyboard);
+        return 0;
+    }
+    if (g_original_keyboard_check_repeat == NULL) return 0;
+    return g_original_keyboard_check_repeat(keyboard);
+}
+
 static void log_mismatch(const char *name, u32 rva,
                          const void *expected, size_t size) {
     log_text("ERROR: runtime code mismatch at ");
@@ -389,6 +560,49 @@ static void install_continuous_visuals(PatchInstaller *installer) {
                   visual->laser_step_operand, retail_step, &g_visual_client_step);
     patch_pointer(installer, "scripted-model visual-step operand",
                   visual->model_step_operand, retail_step, &g_visual_client_step);
+}
+
+static void install_keyboard_timing(PatchInstaller *installer) {
+    static const u8 frame_increment[] = { 0xFF, 0x86, 0x28, 0x0E, 0x00, 0x00 };
+    static const u8 frame_increment_patch[] = {
+        0x90, 0x90, 0x90, 0x90, 0x90, 0x90
+    };
+    const KeyboardLayout *keyboard = &g_game->keyboard;
+    u8 poll_patch[5] = { 0xE8, 0, 0, 0, 0 };
+    u8 repeat_patch[5] = { 0xE8, 0, 0, 0, 0 };
+
+    g_original_keyboard_poll = (KeyboardPollFn)game_address(
+        g_game, keyboard->hardware_poll.target);
+    g_original_keyboard_check_repeat = (KeyboardCheckRepeatFn)game_address(
+        g_game, keyboard->check_repeat.target);
+
+    encode_rel32(&poll_patch[1],
+                 game_address(g_game, keyboard->hardware_poll.instruction + 5u),
+                 poll_keyboard_at_retail_rate);
+    encode_rel32(&repeat_patch[1],
+                 game_address(g_game, keyboard->check_repeat.instruction + 5u),
+                 check_keyboard_repeat_at_retail_rate);
+
+    patch_bytes(installer, "keyboard private-frame increment",
+                keyboard->input_frame_increment,
+                frame_increment, frame_increment_patch,
+                sizeof(frame_increment));
+    patch_branch(installer, "keyboard hardware-poll call",
+                 &keyboard->hardware_poll, 0xE8,
+                 poll_patch, sizeof(poll_patch));
+    patch_branch(installer, "keyboard autorepeat call",
+                 &keyboard->check_repeat, 0xE8,
+                 repeat_patch, sizeof(repeat_patch));
+}
+
+static void install_audio_timing(PatchInstaller *installer) {
+    const AudioLayout *audio = &g_game->audio;
+    void *update_function = game_address(g_game, audio->update_function);
+
+    g_original_audio_update = (AudioUpdateFn)update_function;
+    patch_pointer(installer, "SageAudioManager update vtable entry",
+                  audio->update_vtable_entry,
+                  update_function, update_audio_at_retail_rate);
 }
 
 static void patch_entry_jump(PatchInstaller *installer, const char *name,
@@ -659,52 +873,54 @@ static void install_w3d_clock(PatchInstaller *installer) {
                 normal_expected, normal_patch, sizeof(normal_patch));
 }
 
-static void install_frame_limiter(PatchInstaller *installer, u8 *pacing_stub) {
+static void install_frame_limiter(PatchInstaller *installer) {
     static const u8 display_branch[] = { 0x7D, 0x13 };
     static const u8 display_patch[] = { 0xEB, 0x13 };
-    static const u8 pacing_gate[] = { 0x80, 0x3D };
-    static const u8 pacing_branch[] = { 0x00, 0x74, 0x69 };
+    static const u8 interval_template[] = {
+        0xDB, 0x86, 0x64, 0x01, 0x00, 0x00,
+        0x8B, 0xD8,
+        0xD8, 0x0D, 0, 0, 0, 0,
+        0xD8, 0x3D, 0, 0, 0, 0,
+        0xE8, 0, 0, 0, 0
+    };
     const PacingLayout *pacing = &g_game->pacing;
-    u8 pacing_patch[9] = { 0xE9, 0, 0, 0, 0, 0x90, 0x90, 0x90, 0x90 };
-    u32 expected_gate_flag;
+    u8 interval_expected[sizeof(interval_template)];
+    u8 interval_patch[sizeof(interval_template)];
 
     /* Remove the independent 29 ms presentation wait but retain its timestamp update. */
     patch_bytes(installer, "display limiter branch",
                 pacing->display_limiter_branch,
                 display_branch, display_patch, sizeof(display_patch));
-    if (!g_config->precise_pacing || !installer->ok) return;
 
-    expected_gate_flag = (u32)(uintptr_t)game_address(
-        g_game, pacing->enforce_limit_flag);
-    if (memcmp(game_address(g_game, pacing->outer_gate),
-               pacing_gate, sizeof(pacing_gate)) != 0 ||
-        load_u32(game_address(g_game, pacing->outer_gate + 2u)) !=
-            expected_gate_flag ||
-        memcmp(game_address(g_game, pacing->outer_gate + 6u),
-               pacing_branch, sizeof(pacing_branch)) != 0) {
-        log_line("ERROR: runtime code mismatch at outer pacing gate");
-        installer->ok = FALSE;
-        return;
-    }
+    memcpy(interval_expected, interval_template, sizeof(interval_expected));
+    encode_u32(&interval_expected[10], (u32)(uintptr_t)game_address(
+        g_game, pacing->network_scale));
+    encode_u32(&interval_expected[16], (u32)(uintptr_t)game_address(
+        g_game, pacing->milliseconds_per_logic_frame));
+    encode_rel32(&interval_expected[21],
+                 game_address(g_game, pacing->limiter_interval_block +
+                                      sizeof(interval_expected)),
+                 game_address(g_game, pacing->limiter_conversion_target));
 
-    encode_rel32(&pacing_patch[1],
-                 game_address(g_game, pacing->outer_gate + 5u), pacing_stub);
-    if (!patch_transaction_write(&installer->transaction,
-                                 game_address(g_game, pacing->outer_gate),
-                                 pacing_patch, sizeof(pacing_patch))) {
-        log_line("ERROR: could not write outer pacing gate patch");
-        installer->ok = FALSE;
-    }
+    memset(interval_patch, 0x90, sizeof(interval_patch));
+    interval_patch[0] = 0x8B;
+    interval_patch[1] = 0xD8; /* Preserve timeGetTime() in EBX. */
+    interval_patch[2] = 0x56; /* GameEngine * from ESI. */
+    interval_patch[3] = 0xE8;
+    encode_rel32(&interval_patch[4],
+                 game_address(g_game, pacing->limiter_interval_block + 8u),
+                 get_retail_limiter_interval);
+    patch_bytes(installer, "retail frame-limiter interval",
+                pacing->limiter_interval_block,
+                interval_expected, interval_patch, sizeof(interval_patch));
 }
 
-BOOL game_patches_install(const GameLayout *game, const Config *config,
-                          u8 *pacing_stub) {
+BOOL game_patches_install(const GameLayout *game, const Config *config) {
     PatchInstaller installer;
 
     /* Bootstrap and session hooks can both arrive; code bytes are patched once. */
     if (g_installed) return TRUE;
     if (game == NULL || config == NULL ||
-        (config->precise_pacing && pacing_stub == NULL) ||
         !select_camera_rate_constants(config->target_fps)) {
         return FALSE;
     }
@@ -718,23 +934,20 @@ BOOL game_patches_install(const GameLayout *game, const Config *config,
     installer.ok = TRUE;
 
     install_continuous_visuals(&installer);
+    install_keyboard_timing(&installer);
+    install_audio_timing(&installer);
     install_camera_timing(&installer);
     install_frame_authored_effects(&installer);
     install_particle_and_cursor_timing(&installer);
     install_phase_scheduler(&installer);
     install_w3d_clock(&installer);
-    install_frame_limiter(&installer, pacing_stub);
+    install_frame_limiter(&installer);
 
     /* No live timing globals have been changed yet, so rollback is complete. */
     if (!installer.ok) goto rollback;
 
     g_installed = TRUE;
-    log_line("Static timing and limiter patches installed");
-    log_line("Frame-counted particles, tracers, clouds and Anim2D pinned to retail 30 Hz");
-    log_line("Six logic phases distributed across the configured client-frame rate");
-    log_line("W3D time preserves the retail 990 milliseconds per nominal second");
-    log_line("Radius-cursor opacity throb converted using the live client FPS");
-    log_line("Camera scrolling, held zoom/rotation, settling and shake normalized");
+    log_line("FPS patch installed successfully");
     return TRUE;
 
 rollback:
@@ -783,7 +996,12 @@ void game_patches_reset_state(void) {
     if (g_config != NULL) {
         /* Seed so particle simulation runs on the first client frame of a session. */
         g_particle_update_accumulator = g_config->target_fps - g_retail_visual_fps;
+        /* Seed so audio service runs before the first logic-phase slice. */
+        g_audio_update_accumulator = g_config->target_fps - g_retail_visual_fps;
         g_w3d_time_remainder = 0;
+        g_limiter_interval_remainder = 0;
+        g_limiter_interval_divisor = 0;
+        reset_keyboard_clock();
         /* First direct reader gets floor(990/FPS); the hook distributes remainder. */
         *(u32 *)game_address(g_game, g_game->timing.w3d_milliseconds_per_frame) =
             W3D_RETAIL_MILLISECONDS_PER_SECOND / g_config->target_fps;

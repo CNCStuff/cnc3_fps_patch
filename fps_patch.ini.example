@@ -6,13 +6,5 @@ enabled=1
 ; Supported values: 45, 60, 75, or 90. Default: 90.
 target_fps=90
 
-; 1 installs the QPC-based outer-loop pacer. 0 retains the game's rounded
-; integer-millisecond outer limiter after removing the separate 29 ms display wait.
-precise_pacing=1
-
-; Final busy-spin portion of the QPC wait. Lower values save CPU but can add
-; slightly more jitter. Valid range: 0..5000 microseconds.
-spin_threshold_us=400
-
 ; Write fps_patch.log next to the DLL.
 logging=1

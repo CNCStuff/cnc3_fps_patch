@@ -1,7 +1,6 @@
 #include "runtime.h"
 
 #include "config.h"
-#include "frame_pacer.h"
 #include "game_layout.h"
 #include "game_patches.h"
 #include "log.h"
@@ -60,7 +59,6 @@ static BOOL CALLBACK initialize_runtime_files_once(
     log_line(ini_found ? "Configuration: fps_patch.ini loaded"
                        : "Configuration: using built-in defaults");
     log_u32("target_fps=", runtime->config.target_fps);
-    log_u32("precise_pacing=", runtime->config.precise_pacing != 0);
     log_u32("bootstrap_status=", (u32)runtime->bootstrap_status);
 
     if (!runtime->config.valid) {
@@ -71,10 +69,6 @@ static BOOL CALLBACK initialize_runtime_files_once(
         runtime->disabled = TRUE;
     } else if (runtime->bootstrap_status != BOOTSTRAP_INSTALLED) {
         log_line("ERROR: bootstrap callsite hooks were not installed");
-        runtime->disabled = TRUE;
-    } else if (!frame_pacer_initialize(&runtime->game, &runtime->config,
-                                       runtime->config.precise_pacing)) {
-        log_line("ERROR: could not initialize the precise frame pacer");
         runtime->disabled = TRUE;
     }
 
@@ -150,7 +144,6 @@ static BOOL apply_fixed_rate(Runtime *runtime) {
     *(u32 *)game_address(&runtime->game, pacing->previous_frame_time_ms) = timeGetTime();
 
     game_patches_reset_state();
-    frame_pacer_reset();
     log_u32("Applied client FPS=", target_fps);
     log_u32("Applied initial W3D milliseconds/client-frame=", w3d_step_ms);
     log_hex32("Applied audio milliseconds/client-frame bits=",
@@ -165,8 +158,7 @@ static void apply_from_game_hook(Runtime *runtime, const char *source) {
     log_line(source);
 
     /* Static code writes happen once; live fields are reapplied on every session hook. */
-    if (!game_patches_install(&runtime->game, &runtime->config,
-                              frame_pacer_stub())) {
+    if (!game_patches_install(&runtime->game, &runtime->config)) {
         runtime->disabled = TRUE;
         log_line("ERROR: disabling patch after static installation failure");
     } else if (!apply_fixed_rate(runtime)) {

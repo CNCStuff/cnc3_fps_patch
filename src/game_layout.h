@@ -35,6 +35,20 @@ typedef struct TimingLayout {
     u32 visual_seconds_per_frame;
 } TimingLayout;
 
+typedef struct AudioLayout {
+    /* Retail-rate subsystem update retained behind a vtable wrapper. */
+    u32 update_function;
+    u32 update_vtable_entry;
+} AudioLayout;
+
+typedef struct KeyboardLayout {
+    /* Private frame increment immediately before the hardware-poll call. */
+    u32 input_frame_increment;
+    /* Original poll and repeat calls retained behind rate-converting wrappers. */
+    BranchSite hardware_poll;
+    BranchSite check_repeat;
+} KeyboardLayout;
+
 typedef struct SchedulerLayout {
     /* Start of the 22-byte integer batching expression in DispatchLogicPhase. */
     u32 phase_batch_block;
@@ -83,16 +97,12 @@ typedef struct VisualLayout {
 } VisualLayout;
 
 typedef struct PacingLayout {
-    /* Stock 29 ms presentation wait and GameEngine main-loop limiter sites. */
+    /* Stock 29 ms presentation wait and GameEngine limiter interval block. */
     u32 display_limiter_branch;
-    u32 outer_gate;
-    u32 no_limit_path;
-    u32 history_path;
+    u32 limiter_interval_block;
+    u32 limiter_conversion_target;
     u32 network_scale;
     u32 enforce_limit_flag;
-    u32 total_wait_ms;
-    u32 last_wait_ms;
-    u32 last_frame_duration_ms;
     u32 previous_frame_time_ms;
     u32 milliseconds_per_logic_frame;
 } PacingLayout;
@@ -110,6 +120,8 @@ typedef struct GameLayout {
     u32 pe_size_of_image;
     BootstrapLayout bootstrap;
     TimingLayout timing;
+    AudioLayout audio;
+    KeyboardLayout keyboard;
     SchedulerLayout scheduler;
     W3DClockLayout w3d_clock;
     CameraInputLayout camera_input;
@@ -142,6 +154,13 @@ enum {
     /* Camera settings consumed as fixed per-client-frame coefficients. */
     GLOBAL_DATA_CAMERA_ADJUST_SPEED = 0x0B14,
     GLOBAL_DATA_KEYBOARD_CAMERA_ROTATE_SPEED = 0x0D34,
+
+    /* Keyboard queue/key-state layout proven by the shared repeat flow. */
+    KEYBOARD_EVENT_BEGIN = 0x001C,
+    KEYBOARD_EVENT_END = 0x0020,
+    KEYBOARD_KEY_SEQUENCE_BASE = 0x002C,
+    KEYBOARD_KEY_STATE_STRIDE = 8,
+    KEYBOARD_INPUT_FRAME = 0x0E28,
 
     /* W3DView/CNC3_View virtual slots used by the camera wrappers. */
     W3D_VIEW_SCROLL_BY_SLOT = 0x14,

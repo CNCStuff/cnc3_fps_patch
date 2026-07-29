@@ -164,6 +164,159 @@ authored values and the values it last applied, so session reloads are
 renormalized without accidentally treating an already-normalized value as the
 new retail baseline.
 
+## Keyboard autorepeat
+
+The stock keyboard implementation measures held-key autorepeat with a private
+frame counter. Raising the client rate without separating that counter shortens
+the initial delay and makes Backspace, Delete, and cursor movement repeat at the
+configured client FPS instead of their retail rate.
+
+### Stock control flow
+
+The relevant implementation is instruction-for-instruction identical in all
+five supported images; only relative call destinations move. These are virtual
+addresses for the preferred `0x00400000` image base:
+
+| Build | update entry | frame increment | hardware-poll call | repeat call | repeat entry |
+|---|---:|---:|---:|---:|---:|
+| KW 1.02 Steam 2012 | `0x0056F588` | `0x0056F58B` | `0x0056F591` | `0x0056F3FC` | `0x0056F28A` |
+| KW 1.02 EA/Origin 2009 | `0x0049BB4D` | `0x0049BB50` | `0x0049BB56` | `0x0049B9C1` | `0x0049B84F` |
+| KW 1.03 | `0x004DC444` | `0x004DC447` | `0x004DC44D` | `0x004DC2B8` | `0x004DC0C2` |
+| TW 1.09 | `0x00568840` | `0x00568843` | `0x00568849` | `0x005686B4` | `0x005684BE` |
+| TW 1.10 | `0x00495F78` | `0x00495F7B` | `0x00495F81` | `0x00495DEC` | `0x00495C7A` |
+
+The 22-byte update method has this complete shape:
+
+```asm
+push esi
+mov  esi, ecx
+inc  dword ptr [esi+0E28h] ; Keyboard::inputFrame
+call poll_hardware
+mov  ecx, esi
+pop  esi
+jmp  process_events
+```
+
+`process_events` copies each physical event's state into the 256-entry key
+table and timestamps that key with the same `inputFrame`:
+
+```asm
+mov ecx, [esi+0E28h]
+mov [esi+eax*8+2Ch], ecx   ; key[eax].sequence = inputFrame
+...
+mov ecx, esi
+call check_key_repeat
+```
+
+The stock 111-byte repeat routine scans the table in DirectInput key-code
+order. A held key becomes eligible when:
+
+```asm
+mov edx, [esi+0E28h]
+sub edx, [ecx]
+cmp edx, 0Ah
+ja  generate_repeat
+```
+
+It queues one event whose state is `0x0102` (`KEY_DOWN | AUTOREPEAT`), resets
+every key timestamp to the current frame, and then backdates the selected key:
+
+```asm
+mov word ptr [event.state], 102h
+...
+mov eax, [inputFrame]
+sub eax, 0Ch
+mov [esi+ebx*8+2Ch], eax
+```
+
+The unsigned `> 10` test produces the first repeat after eleven keyboard
+frames. The `inputFrame - 12` backdate makes the selected key eligible on the
+next invocation, so sustained repeat occurs once per keyboard update. At stock
+30 FPS that is a 366.7 ms initial delay and 30 repeats/s; an unpatched 90 FPS
+client reduces the delay to 122.2 ms and emits 90 repeats/s.
+
+### Resolver and patch
+
+There are no per-build keyboard signatures. One shared 22-byte update
+signature and one shared 111-byte repeat-body signature each match exactly
+once in TW 1.09, TW 1.10, KW 1.02 Steam, KW 1.02 EA/Origin, and KW 1.03. The
+only wildcard bytes are relocated `rel32` operands.
+
+The resolver decodes the update method's hardware-poll call and tail jump. From
+the decoded event processor it verifies the physical-event timestamp store at
+offset `+0x26`, the repeat-call block at `+0x79`, and that the call at `+0x7F`
+targets the signature-validated repeat body. Resolution fails before any write
+if any relationship differs.
+
+Installation makes three transactional changes:
+
+```text
+INC [Keyboard+0x0E28]  -> six NOPs
+CALL hardware_poll     -> CALL poll_keyboard_at_retail_rate
+CALL check_key_repeat  -> CALL check_keyboard_repeat_at_retail_rate
+```
+
+The poll wrapper uses the already-imported millisecond clock and a small
+fixed-point accumulator:
+
+```c
+scaled = remainder + elapsed_ms * 30;
+repeat_tick = scaled >= 1000;
+remainder = scaled % 1000;
+```
+
+At most one logical tick is emitted per physical poll, so a stall cannot cause
+a burst of queued repeats. The wrapper advances `Keyboard::inputFrame` only on
+that 30 Hz tick but calls the original hardware poll unconditionally. Physical
+input latency therefore remains at the configured client rate.
+
+An event detected between logical ticks is timestamped for the next logical
+tick. This models the frame on which a retail 30 FPS client would first have
+observed it and preserves the full eleven-tick initial delay. The original
+repeat routine remains intact, including its key ordering, one-event limit,
+queue insertion, `0x0102` flag, and timestamp-reset behavior.
+
+Using elapsed time rather than counting calls is important because not every
+caller runs at the configured client rate. It also prevents an immediate extra
+poll from advancing the repeat clock twice. The normal client update, APT
+loading-screen updates, the approximately 20 ms loading wait loop, and the
+conditional extra-poll path all enter the same patched virtual method; there is
+no second repeat implementation.
+
+### Downstream keyboard audit
+
+The affected native text-entry path was checked in both KW 1.02 Steam and TW
+1.10. Their wrappers (`0x004AEB30` and `0x00842F2B`) call the common handlers
+at `0x005030A7` and `0x0042C887`. Those handlers require the key-down bit but do
+not reject `AUTOREPEAT` for Backspace (DirectInput code 14), Delete, Left,
+Right, Home, End, or the modified Left/Right word-navigation branches. All of
+those editing operations therefore receive the corrected retail cadence.
+
+Ordinary mapped gameplay commands do not inherit the bug. The keyboard event
+emitter creates game-message IDs 23 and 24 and includes the full state word.
+The matched-key path in `MetaEventTranslator` tests bit `0x0100` before emitting
+a mapped command (`0x004E3E17` in KW 1.02 Steam and `0x0040E2EF` in TW 1.10).
+Synthetic repeats are consequently suppressed for normal MetaMap hotkeys while
+native GUI gadgets continue to receive them.
+
+The tactical-camera held-key behaviors are a separate once-per-client-frame
+path. They are already covered by the scroll, rotation, and held-zoom
+normalization described above. In KW 1.02 Steam the relevant behavior entries
+are `0x0095F780`, `0x0095F7BA`, `0x0095F7F2`, `0x0095F81A`, and `0x0095F832`.
+
+A targeted scan of the five binaries finds the same eight `Keyboard+0x0E28`
+instructions in each keyboard implementation: initialization/reset, the two
+repeat reads, physical-event timestamping, two queue/reset reads, and the update
+increment. Each image has one additional instruction elsewhere that happens to
+use displacement `0x0E28` with a different object; it is not a Keyboard
+reference. No other timer exists inside `Keyboard`.
+
+Other direct key/modifier reads are instantaneous event-time decisions, such
+as focus navigation, selection modifiers, rally-point placement, or build
+button variants. The tracked-key release scan emits an end message only when a
+key changes from down to up; calling it more often reduces release latency but
+does not accumulate actions.
+
 ## Six-phase logic scheduler
 
 The authoritative 15 Hz logic tick is split into six ordered phases. The
@@ -362,7 +515,86 @@ correct value is approximately `11.111` ms. A seconds-per-frame value such as
 multisound cues.
 
 The DLL therefore writes `targetFPS`, `1000/targetFPS`, and `1/targetFPS` to
-the three caches respectively. No audio instruction detour is required.
+the three caches respectively. Audio also needs a rate-converted subsystem
+update because request admission and `Limit` lifetime are client-frame
+operations rather than millisecond integration alone.
+
+### Audio request and `Limit` cadence
+
+`CashGaining` and `CashLosing` are zero-delay `Limit=1` one-shots. The Money
+logic submits them through the normal audio-event virtual method. The manager
+checks the active and pending request lists before admitting each event, then
+moves requests through preparation, physical playback, completion, and list
+cleanup from `SageAudioManager_UpdateForClientFrame`.
+
+Raising the complete client rate also calls that manager 45--90 times per
+second and interleaves it between logic-phase slices that retail processes as
+one group. Pending requests can become playing requests, completed instances
+can leave the lists, and a `Limit` slot can become available between phases
+where retail performs no audio service. This is why money gain/spend ticks can
+be admitted much more frequently even though authoritative Money logic remains
+15 Hz. This manager-level cadence is the remaining rate-sensitive mechanism
+consistent with the recorded symptom; the replacement below still requires a
+fresh vanilla-versus-patched runtime comparison.
+
+An earlier implementation redirected three frame-duration reads inside
+`SageAudioManager_PrepareAndQueueRequest`. Runtime comparison showed that it
+did not correct the money sounds. Static control flow explains why: after the
+eligibility/`Limit` pre-check, a successful ordinary request jumps directly to
+queue insertion and skips all three reads. That block handles a request whose
+pre-check failed and is being retained for deferred/retry processing; it is not
+the normal accepted initial-request path. The operand redirections were
+therefore removed.
+
+The current patch redirects the manager's vtable slot 5 through a small
+Bresenham-style rate converter:
+
+```c
+audioAccumulator += 30;
+if (audioAccumulator >= targetFPS) {
+    audioAccumulator -= targetFPS;
+    originalAudioUpdate(manager);
+}
+```
+
+The accumulator is seeded so audio service runs before the first logic-phase
+slice. At 60 and 90 FPS this invokes the original manager every two or three
+client frames. The 45 and 75 FPS schedules distribute two audio updates across
+three or five client slices without accumulating long-term drift. The original
+manager, request logic, event limits, playback lists, and physical-renderer
+callbacks remain unchanged.
+
+`SageAudioManager_ComputeClientFrameDeltaMilliseconds` reads the difference
+between the current and previous client-frame numbers. After skipped wrapper
+calls it therefore sees the complete span and multiplies it by
+`1000/targetFPS`; for example, three 90 FPS client-frame intervals produce the
+same `33.333 ms` delta as one retail audio update. Authored delays,
+multisounds, and loop intervals retain their millisecond progression while
+queue admission and cleanup are intended to return to the retail 30 Hz service
+domain.
+
+The resolver finds one unique stable tail inside the update function, verifies
+its entry 0x12A bytes earlier, and requires exactly one read-only absolute xref
+to that entry. That xref is the vtable slot patched transactionally at runtime:
+
+```text
+Build                    update function RVA  vtable-slot RVA
+KW 1.02 Steam 2012       0x00068484           0x00619DD8
+KW 1.02 EA 2009          0x00368D22           0x00698D20
+KW 1.03                  0x003B5C49           0x006A4C98
+TW 1.09                  0x00068A5D           0x006354C8
+TW 1.10                  0x00400C74           0x006C6590
+```
+
+The affected request state is audio-side, and audio filename/delay
+randomization advances a dedicated RNG rather than `g_gameLogicRandomState`.
+`GameLogic_ComputeCRC` hashes the logic RNG state and has no direct reference
+to the audio RNG or these request-delay values. This makes ordinary audio a
+low-probability multiplayer-desync source, not a statically proven impossible
+one. Completed sounds can update ScriptEngine state, and Worldbuilder exposes
+sound- and speech-completion conditions that can execute scripts. Scripted or
+custom multiplayer content therefore remains a possible indirect
+audio-to-gameplay bridge and needs synchronized runtime testing.
 
 This is not a blanket rewrite of startup timing state. The nearby 15 Hz logic
 FPS and seconds-per-logic-frame globals remain unchanged, as do the many
@@ -401,38 +633,62 @@ milliseconds-per-client-frame field. Camera and other W3DView functions which
 read that field therefore follow the same long-term 990 ms rate instead of
 remaining at a truncated constant 16 or 13 ms.
 
-## QPC pacing hook
+## Retail-equivalent stock pacing
 
-When `precise_pacing=1`, the nine-byte stock limiter gate at RVA `0x00256449`
-is replaced with a jump to a generated 25-byte x86 stub. The original bytes,
-including the ASLR-relocated absolute operand, are validated first.
+The separate 29 ms presentation wait is bypassed, but the outer limiter remains
+the game's original `timeGetTime`/`Sleep(0)` implementation.
+Its limit/no-limit branches, timestamp updates, accumulated wait telemetry,
+64-frame performance history, and adaptive update multiplier are not replaced.
 
-The stub preserves both original control paths:
+Only its 25-byte interval calculation is redirected. In the three supported KW
+layouts that block begins at:
 
-```asm
-cmp byte ptr [g_enforceFPSLimitThisFrame], 0
-je  no_limit
-
-push esi                    ; GameEngine *
-call pace_client_frame      ; __stdcall
-jmp pacing_history_update
-
-no_limit:
-jmp original_no_limit_path
+```text
+Build                    interval block RVA
+KW 1.02 Steam 2012       0x00256457
+KW 1.02 EA/Origin 2009   0x00184198
+KW 1.03                  0x001C4012
 ```
 
-The C pacer uses an absolute `QueryPerformanceCounter` deadline. Its period is
-still calculated from the game's live milliseconds-per-logic-frame,
-`GameEngine::pacing_update_multiplier`, and network pacing scale. Consequently
-the normal adaptive and synchronized multiplayer slowdown remain represented.
+The original block converts
+`millisecondsPerLogicFrame / (updateMultiplier * networkScale)` directly to
+one integer client-frame interval. At 60 and 75 FPS this truncates every frame
+independently to 16 or 13 ms, running complete logic cycles faster than
+retail. An exact-nominal QPC replacement instead produces a 66.667 ms cycle,
+which is about one percent slower than the observed retail limiter and removes
+its natural millisecond scheduling variation.
 
-The deadline is re-anchored after a long pause or skipped-limiter interval. A
-short configurable spin tail avoids throwing away sub-millisecond precision;
-the coarse portion of the wait uses `Sleep(1)`, `SwitchToThread`, or `Sleep(0)`.
+The replacement derives and truncates one retail client-frame interval first:
 
-Setting `precise_pacing=0` leaves the stock outer limiter in place. Its rounded
-22/16/13/11 ms periods do not hit every requested rate exactly, but it remains
-useful when isolating QPC pacing behavior.
+```text
+retailFrameMs = trunc((1000 / 15) / (2 * networkScale))
+logicCycleBudgetMs = 2 * retailFrameMs
+```
+
+It then uses a quotient/remainder accumulator to distribute that integer
+budget across `GameEngine::pacing_update_multiplier` high-rate frames. With
+normal network scale and the configured multiplier, the schedules are:
+
+```text
+45 FPS: 22, 22, 22                 = 66 ms per logic cycle
+60 FPS: 16, 17, 16, 17             = 66 ms per logic cycle
+75 FPS: 13, 13, 13, 13, 14         = 66 ms per logic cycle
+90 FPS: 11, 11, 11, 11, 11, 11     = 66 ms per logic cycle
+```
+
+Network pacing is retained in the retail domain. For example, scale `0.95`
+produces the same 35 ms retail frame and 70 ms retail logic-cycle budget as the
+stock calculation, then subdivides that budget across the selected client
+rate. If the engine lowers its adaptive update multiplier, the same remainder
+logic proportionally lengthens the cycle. A divisor change rescales the saved
+fractional phase instead of discarding it.
+
+This removes the QPC deadline, generated executable stub, `Sleep(1)`/spin
+tail, and their configuration. More importantly for audio cadence, it retains
+the stock wait loop's millisecond granularity, scheduler jitter, skipped-limit
+behavior, and oversleep handling. The helper computes only a local wait
+interval; no clock value is stored in simulation state or included in the game
+CRC.
 
 ## Patch safety
 

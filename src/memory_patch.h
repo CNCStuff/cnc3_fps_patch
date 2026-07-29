@@ -4,7 +4,7 @@
 #include "common.h"
 
 enum {
-    PATCH_TRANSACTION_CAPACITY = 24,
+    PATCH_TRANSACTION_CAPACITY = 32,
     PATCH_MAX_BYTES = 48
 };
 
@@ -22,8 +22,6 @@ typedef struct PatchTransaction {
 } PatchTransaction;
 
 BOOL write_protected(void *destination, const void *source, size_t size);
-BOOL allocate_executable_stub(size_t size, u8 **out_stub);
-BOOL finalize_executable_stub(u8 *stub, size_t size);
 void encode_u32(u8 *destination, u32 value);
 void encode_rel32(u8 *operand, const u8 *next_instruction, const void *target);
 void patch_transaction_init(PatchTransaction *transaction);

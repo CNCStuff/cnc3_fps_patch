@@ -13,16 +13,16 @@ automatically. The proxy forwards DirectInput calls to the system DLL.
 Reverse engineering of the game binary, the implementation and documentation were heavily LLM-assisted.
 
 ## Installation
+
 1. Download the newest release zip from [the automated builds](https://github.com/CNCStuff/cnc3_fps_patch/releases/latest)
 
 2. Find the directory with the game module that you want to patch:
-   - Kane's Wrath: the directory containing `cnc3ep1.dat`, such as `RetailExe\1.2`.
-   - Tiberium Wars: the directory containing `cnc3game.dat`, such as
-     `RetailExe\1.9` or `RetailExe\1.10`.
+   - Kane's Wrath: the directory containing `cnc3ep1.dat`, such as `RetailExe\1.2` or `RetailExe\1.3`.
+   - Tiberium Wars: the directory containing `cnc3game.dat`, such as `RetailExe\1.9` or `RetailExe\1.10`.
    If you use multiple versions, place the DLL and INI files into each version's
    directory.
 
-3. That's it! Now you can start the game and go into the campaign or skirmish, and the game will render at 90 FPS! If it doesn't, you can check the file named `fps_patch.log` created in the same folder with the .dll and the .ini. If the `.log` file doesn't appear, you most likely put the `.dll` in the wrong folder - not the one with the game version that you're actually using. Remember to put the `.dll` and `.ini` next to the `.dat` file, not the main launcher `.exe`.
+3. That's it! Now you can start the game and go into the campaign or skirmish, and the game will render at 90 FPS! If it doesn't, you can check the file named `fps_patch.log` created in the same folder with the .dll. If the `.log` file doesn't appear, you most likely put the `.dll` in the wrong folder - not the one with the game version that you're actually using. Remember to put the `.dll` and `.ini` next to the `.dat` file, not the main launcher `.exe`.
 
 ## Configuration
 
@@ -34,32 +34,39 @@ target_fps=45
 ```
 
 ## Current status
-There was limited gameplay testing, but so far:
 
-- All animations play at the same usual speed.
+Campaign and skirmish should play very smoothly without any major issues.
 
-- Particle effects, ability decals work at normal speed. A lot of particle effects are authored to play at 30 FPS, so they might look a bit more "stuttery" even if they render at 90 FPS. This isn't something that the patch can fix directly.
+The patch explicitly handles:
 
-- Audio delay is properly adjusted so that it matches with actual gameplay and visual effects.
+- Animations.
 
-- Camera input in Kane's Wrath and Tiberium Wars is normalized to its retail
-  30 FPS speed. This covers edge scrolling, right-mouse drag scrolling,
-  arrow-key movement, held-key zoom, keyboard rotation, terrain-height
-  settling, and camera-shake decay. Mouse-wheel zoom remains one stock step
-  per physical wheel detent because that path is event-driven rather than
-  evaluated once per rendered frame.
+- Particle effects. Note: they are authored to play at 30 FPS, so they might look a bit more "stuttery" with the patch when rendered at 90 FPS. This isn't something that the patch can fix without actually changing the particle effects.
+
+- Ability decal throbbing.
+
+- Audio delay for everything, including normal units, special powers, short sound effects - e.g. money ticking.
+
+- Camera input via edge scrolling, RMB drag scrolling, arrow keys, rotation.
+
+- Key repetition delay in the chat for keys such as Backspace.
 
 ## Multiplayer
-No proper multiplayer testing was done yet, so it'll be appreciated if you try! In theory, the patch should **not** cause any desyncs, and moreover, should work fine if only one player has the patch, while others play with the vanilla game. This is because the actual game logic still runs at the same speed.
 
-But be aware that this is still beta-quality software: do not yet use it in important matches, official competitions and so on.
+From current limited testing multiplayer is **unstable**: some matches play fine end to end, but in some longer games the game might desynchronize.
+
+So, for now: only use this patch in multiplayer **at your own risk**, and avoid using it in tournaments or other high-stake games.
 
 ## Issues
 
-Please report any issues, such as crashes, animations or any other effects/gameplay going faster/slower than expected to https://github.com/CNCStuff/cnc3_fps_patch/issues. Feedback is appreciated!
+Please report any issues, such as crashes, animations or any other effects or gameplay going faster or slower than expected to https://github.com/CNCStuff/cnc3_fps_patch/issues. Feedback is appreciated!
 
 Windows 7 users who are missing the Universal CRT can install
 [Microsoft's Universal C Runtime update](https://support.microsoft.com/en-us/servicing/os/windows/2020/06/update-for-universal-c-runtime-in-windows).
+
+## Future directions
+
+This patch could likely be adapted to Red Alert 3 because the games share the same engine, with little evolution between them.
 
 ## License
 

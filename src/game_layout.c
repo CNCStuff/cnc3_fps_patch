@@ -39,6 +39,46 @@ static const u16 g_tw_session_tail_pattern[] = {
     0x55, 0x56, 0x57, 0x8B, 0x7C, 0x24, 0x10
 };
 
+/*
+ * TW 1.09/1.10 and all supported KW builds share this complete Keyboard
+ * update leaf. The decoded tail jump reaches the event processor, where the
+ * repeat call is validated at its fixed control-flow offset below.
+ */
+static const u16 g_keyboard_update_pattern[] = {
+    0x56, 0x8B, 0xF1,
+    0xFF, 0x86, 0x28, 0x0E, 0x00, 0x00,
+    0xE8, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x8B, 0xCE, 0x5E,
+    0xE9, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY
+};
+
+/* The 111-byte stock repeat body; only its queue-insertion CALL relocates. */
+static const u16 g_keyboard_repeat_body_pattern[] = {
+    0x55, 0x8B, 0xEC, 0x51, 0x51, 0x53, 0x56, 0x8B, 0xF1, 0x57,
+    0x32, 0xC0, 0x33, 0xDB, 0x8D, 0x4E, 0x2C,
+    0xBF, 0x00, 0x01, 0x00, 0x00,
+    0xF6, 0x41, 0xFE, 0x02, 0x74, 0x0D,
+    0x8B, 0x96, 0x28, 0x0E, 0x00, 0x00, 0x2B, 0x11,
+    0x83, 0xFA, 0x0A, 0x77, 0x0A,
+    0x43, 0x83, 0xC1, 0x08, 0x3B, 0xDF, 0x7C, 0xE5, 0xEB, 0x37,
+    0x8D, 0x45, 0xF8, 0x50, 0x8D, 0x4E, 0x1C, 0x88, 0x5D, 0xF8,
+    0x66, 0xC7, 0x45, 0xFA, 0x02, 0x01, 0xC6, 0x45, 0xF9, 0x00,
+    0xE8, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x8D, 0x86, 0x28, 0x0E, 0x00, 0x00, 0x8D, 0x4E, 0x2C,
+    0x8B, 0x10, 0x89, 0x11, 0x83, 0xC1, 0x08, 0x4F, 0x75, 0xF6,
+    0x8B, 0x00, 0x83, 0xE8, 0x0C, 0x89, 0x44, 0xDE, 0x2C, 0xB0, 0x01,
+    0x5F, 0x5E, 0x5B, 0xC9, 0xC3
+};
+static const u8 g_keyboard_physical_event_stamp[] = {
+    0x8B, 0x8E, 0x28, 0x0E, 0x00, 0x00,
+    0x89, 0x4C, 0xC6, 0x2C
+};
+static const u16 g_keyboard_repeat_call_block[] = {
+    0x3B, 0xFB, 0x75, 0x90, 0x8B, 0xCE,
+    0xE8, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x66, 0x83, 0x7E, 0x18, 0x00
+};
+
 /* Continuous visual integration sites that incorrectly share retail 1/30. */
 static const u16 g_camera_pattern[] = {
     0x80, 0xBB, 0xC8, 0x00, 0x00, 0x00, 0x00, 0x75, 0x6F,
@@ -152,12 +192,6 @@ static const u16 g_pacing_pattern[] = {
     0xD8, 0x0D, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
     0xD8, 0x3D, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY
 };
-static const u16 g_history_pattern[] = {
-    0xFF, 0x86, 0x60, 0x01, 0x00, 0x00,
-    0x83, 0xBE, 0x60, 0x01, 0x00, 0x00, 0x40,
-    0x7C, 0x07, 0x83, 0xA6, 0x60, 0x01, 0x00, 0x00, 0x00
-};
-
 /*
  * Confirmed KW virtual addresses. Absolute and relative operands are the only
  * wildcarded bytes in the signatures below.
@@ -214,6 +248,26 @@ static const u16 g_audio_initializer_pattern[] = {
     0xD8, 0x3D, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
     0xD9, 0x1D, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
     0x59, 0xC3
+};
+
+/*
+ * Stable tail of SageAudioManager::UpdateForClientFrame. The function begins
+ * 0x12A bytes before this block in every supported image. Its sole non-code
+ * absolute xref is vtable slot 5.
+ */
+static const u16 g_audio_update_tail_pattern[] = {
+    0x8B, 0x8E, 0x6C, 0x02, 0x00, 0x00,
+    0xE8, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x8B, 0x4E, 0x30, 0x3B, 0xCB, 0x74, PATTERN_ANY,
+    0xF3, 0x0F, 0x2C, 0x46, 0x34, 0x50,
+    0xE8, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x8B, 0xCE, 0xE8, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x8B, 0xCE, 0xE8, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x8D, 0x45, 0xF8, 0x50, 0x8B, 0xCE,
+    0xE8, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x8D, 0x45, 0xF8, 0x50, 0x8B, 0xCE,
+    0xE8, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
+    0x8B, 0xCE, 0xE8, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY
 };
 static const u16 g_float_initializer_pattern[] = {
     0x51, 0xA1, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY, PATTERN_ANY,
@@ -324,6 +378,40 @@ static BOOL find_signature_using_absolute_operand(
                                           input_operand_offset, expected_absolute, out_rva);
 }
 
+static BOOL find_unique_readonly_pointer(
+    u8 *module, IMAGE_NT_HEADERS32 *nt, u32 expected_absolute, u32 *out_rva) {
+    IMAGE_SECTION_HEADER *section = IMAGE_FIRST_SECTION(nt);
+    u32 found = 0;
+    size_t matches = 0;
+    u16 section_index;
+
+    for (section_index = 0; section_index < nt->FileHeader.NumberOfSections;
+         ++section_index, ++section) {
+        u32 start;
+        u32 size;
+        u32 offset;
+        if ((section->Characteristics & IMAGE_SCN_MEM_READ) == 0 ||
+            (section->Characteristics & (IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_WRITE)) != 0) {
+            continue;
+        }
+        start = section->VirtualAddress;
+        size = section->Misc.VirtualSize;
+        if (start >= nt->OptionalHeader.SizeOfImage ||
+            size > nt->OptionalHeader.SizeOfImage - start || size < sizeof(u32)) {
+            continue;
+        }
+        for (offset = 0; offset <= size - sizeof(u32); offset += sizeof(u32)) {
+            if (load_u32(module + start + offset) == expected_absolute) {
+                found = start + offset;
+                if (++matches > 1) return FALSE;
+            }
+        }
+    }
+    if (matches != 1) return FALSE;
+    *out_rva = found;
+    return TRUE;
+}
+
 static BOOL absolute_operand_to_rva(u8 *module, u32 image_size,
                                     u32 absolute, u32 *out_rva) {
     uintptr_t base = (uintptr_t)module;
@@ -426,6 +514,47 @@ static BOOL resolve_bootstrap_sites(
     /* Exactly one ABI-specific bootstrap must match; ambiguity is unsafe. */
     if (kw_resolved == tw_resolved) return FALSE;
     *game = kw_resolved ? kw_game : tw_game;
+    return TRUE;
+}
+
+static BOOL resolve_keyboard_sites(
+    u8 *module, IMAGE_NT_HEADERS32 *nt, GameLayout *game) {
+    KeyboardLayout *keyboard = &game->keyboard;
+    u32 update;
+    u32 process_events;
+
+    if (!FIND_UNIQUE(module, nt, g_keyboard_update_pattern, &update)) return FALSE;
+    keyboard->input_frame_increment = update + 3u;
+    keyboard->hardware_poll.instruction = update + 9u;
+    if (!decode_relative_target(
+            module, game->pe_size_of_image,
+            keyboard->hardware_poll.instruction, 0xE8,
+            &keyboard->hardware_poll.target) ||
+        !decode_relative_target(
+            module, game->pe_size_of_image, update + 17u, 0xE9,
+            &process_events) ||
+        process_events > game->pe_size_of_image - 0x89u ||
+        memcmp(module + process_events + 0x26u,
+               g_keyboard_physical_event_stamp,
+               sizeof(g_keyboard_physical_event_stamp)) != 0 ||
+        !pattern_matches(module + process_events + 0x79u,
+                         g_keyboard_repeat_call_block,
+                         ARRAY_COUNT(g_keyboard_repeat_call_block))) {
+        return FALSE;
+    }
+
+    keyboard->check_repeat.instruction = process_events + 0x7Fu;
+    if (!decode_relative_target(
+            module, game->pe_size_of_image,
+            keyboard->check_repeat.instruction, 0xE8,
+            &keyboard->check_repeat.target) ||
+        keyboard->check_repeat.target >
+            game->pe_size_of_image - ARRAY_COUNT(g_keyboard_repeat_body_pattern) ||
+        !pattern_matches(module + keyboard->check_repeat.target,
+                         g_keyboard_repeat_body_pattern,
+                         ARRAY_COUNT(g_keyboard_repeat_body_pattern))) {
+        return FALSE;
+    }
     return TRUE;
 }
 
@@ -542,28 +671,23 @@ static BOOL resolve_pacing_sites(
     u8 *module, IMAGE_NT_HEADERS32 *nt, GameLayout *game) {
     PacingLayout *pacing = &game->pacing;
     u32 match;
-    i32 no_limit_path;
 
     if (!FIND_UNIQUE(module, nt, g_display_pattern, &match)) return FALSE;
     pacing->display_limiter_branch = match + 3u;
 
     if (!FIND_UNIQUE(module, nt, g_pacing_pattern, &match)) return FALSE;
-    pacing->outer_gate = match + 11u;
+    pacing->limiter_interval_block = match + 25u;
     if (!read_absolute_rva(module, game->pe_size_of_image, match + 13u,
                            &pacing->enforce_limit_flag) ||
         !read_absolute_rva(module, game->pe_size_of_image, match + 35u,
                            &pacing->network_scale) ||
         !read_absolute_rva(module, game->pe_size_of_image, match + 41u,
-                           &pacing->milliseconds_per_logic_frame)) {
+                           &pacing->milliseconds_per_logic_frame) ||
+        !decode_relative_target(module, game->pe_size_of_image,
+                                match + 45u, 0xE8,
+                                &pacing->limiter_conversion_target)) {
         return FALSE;
     }
-
-    if (!FIND_UNIQUE(module, nt, g_history_pattern, &pacing->history_path)) return FALSE;
-    /* Decode the original gate's short JE destination, which the stub preserves. */
-    no_limit_path = (i32)(pacing->outer_gate + 9u) +
-                    (int8_t)module[pacing->outer_gate + 8u];
-    if (no_limit_path < 0 || (u32)no_limit_path >= game->pe_size_of_image) return FALSE;
-    pacing->no_limit_path = (u32)no_limit_path;
 
     /* The display wait reads GlobalData; prove it is the same resolved cluster. */
     if (!read_absolute_rva(module, game->pe_size_of_image,
@@ -580,9 +704,6 @@ static BOOL resolve_pacing_sites(
      * several weak signatures for otherwise anonymous DWORDs.
      */
     game->timing.game_engine_pointer = pacing->enforce_limit_flag + 0x27u;
-    pacing->total_wait_ms = pacing->enforce_limit_flag + 0x13u;
-    pacing->last_wait_ms = pacing->enforce_limit_flag + 0x17u;
-    pacing->last_frame_duration_ms = pacing->enforce_limit_flag + 0x1Bu;
     pacing->previous_frame_time_ms = pacing->enforce_limit_flag + 0x1Fu;
     return TRUE;
 }
@@ -638,6 +759,27 @@ static BOOL resolve_cached_timing_values(
                &initializer) &&
            read_absolute_rva(module, game->pe_size_of_image, initializer + 20u,
                              &timing->visual_seconds_per_frame);
+}
+
+static BOOL resolve_audio_sites(
+    u8 *module, IMAGE_NT_HEADERS32 *nt, GameLayout *game) {
+    AudioLayout *audio = &game->audio;
+    static const u8 update_entry[] = { 0x55, 0x8B, 0xEC, 0xA1 };
+    u32 tail;
+    u32 expected_update;
+
+    if (!FIND_UNIQUE(module, nt, g_audio_update_tail_pattern, &tail) ||
+        tail < 0x12Au) {
+        return FALSE;
+    }
+    audio->update_function = tail - 0x12Au;
+    if (memcmp(module + audio->update_function,
+               update_entry, sizeof(update_entry)) != 0) {
+        return FALSE;
+    }
+    expected_update = (u32)(uintptr_t)(module + audio->update_function);
+    return find_unique_readonly_pointer(
+        module, nt, expected_update, &audio->update_vtable_entry);
 }
 
 static BOOL resolve_scheduler_sites(
@@ -726,7 +868,8 @@ GameResolveResult resolve_game_layout(GameLayout *out_game, u8 *module) {
     if (!resolve_bootstrap_sites(module, nt, &game)) {
         return GAME_UNSUPPORTED_BUILD;
     }
-    if (!resolve_visual_sites(module, nt, &game) ||
+    if (!resolve_keyboard_sites(module, nt, &game) ||
+        !resolve_visual_sites(module, nt, &game) ||
         !resolve_pacing_sites(module, nt, &game)) {
         return GAME_UNSUPPORTED_BUILD;
     }
@@ -739,6 +882,7 @@ GameResolveResult resolve_game_layout(GameLayout *out_game, u8 *module) {
         return GAME_UNSUPPORTED_BUILD;
     }
     if (!resolve_cached_timing_values(module, nt, &game) ||
+        !resolve_audio_sites(module, nt, &game) ||
         !resolve_scheduler_sites(module, nt, &game) ||
         !resolve_w3d_clock_sites(module, nt, &game) ||
         load_u32(module + game.timing.logic_fps) != 15u ||

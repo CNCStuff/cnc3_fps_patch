@@ -8,8 +8,6 @@ typedef struct Config {
     /* Parsing can succeed while a value is outside the supported schedules. */
     BOOL valid;
     u32 target_fps;
-    BOOL precise_pacing;
-    u32 spin_threshold_us;
     BOOL logging;
 } Config;
 
